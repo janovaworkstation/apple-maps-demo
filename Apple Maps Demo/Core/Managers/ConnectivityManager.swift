@@ -38,9 +38,10 @@ class ConnectivityManager: ObservableObject {
     }
     
     deinit {
-        Task { @MainActor in
-            stopMonitoring()
-        }
+        // Stop monitoring synchronously to avoid capture issues
+        networkMonitor?.cancel()
+        qualityTestTimer?.invalidate()
+        qualityTestTimer = nil
     }
     
     // MARK: - Public Interface

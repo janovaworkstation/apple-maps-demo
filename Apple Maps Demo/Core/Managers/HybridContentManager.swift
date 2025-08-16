@@ -136,15 +136,10 @@ class HybridContentManager: ObservableObject {
         
         syncStatus = .syncing
         
-        do {
-            await syncOfflineToOnlineContent()
-            await syncCacheWithLatestContent()
-            syncStatus = .completed
-            print("✅ Sync completed successfully")
-        } catch {
-            syncStatus = .failed(error)
-            print("❌ Sync failed: \(error)")
-        }
+        await syncOfflineToOnlineContent()
+        await syncCacheWithLatestContent()
+        syncStatus = .completed
+        print("✅ Sync completed successfully")
     }
     
     // MARK: - Content Retrieval Strategies

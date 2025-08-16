@@ -230,7 +230,7 @@ class ContentValidator {
     
     private func hasSpecificDetails(_ text: String) -> Bool {
         // Check for dates, numbers, or specific names
-        let datePattern = #"\b\d{4}\b|\b\d{1,2}th century\b"#
+        _ = #"\b\d{4}\b|\b\d{1,2}th century\b"#
         let numberPattern = #"\b\d+\b"#
         
         let hasNumbers = text.range(of: numberPattern, options: .regularExpression) != nil

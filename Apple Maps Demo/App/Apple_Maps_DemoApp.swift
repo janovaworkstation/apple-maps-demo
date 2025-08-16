@@ -31,9 +31,13 @@ struct Apple_Maps_DemoApp: App {
 
     var body: some Scene {
         WindowGroup {
-            TourMapView()
+            MainTabView()
                 .environmentObject(audioManager)
                 .environmentObject(locationManager)
+                .overlay(
+                    QuickAccessOverlay()
+                        .environmentObject(audioManager)
+                )
         }
         .modelContainer(sharedModelContainer)
     }

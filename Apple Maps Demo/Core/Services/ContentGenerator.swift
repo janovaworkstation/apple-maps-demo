@@ -46,7 +46,7 @@ class ContentGenerator: ObservableObject {
         
         // Generate new content
         let template = selectPromptTemplate(for: poi, context: context, preferences: preferences)
-        let prompt = template.buildPrompt(poi: poi, context: context, preferences: preferences)
+        _ = template.buildPrompt(poi: poi, context: context, preferences: preferences)
         
         let generatedContent = try await openAIService.generateAudioContent(
             for: poi,

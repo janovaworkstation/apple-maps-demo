@@ -106,18 +106,7 @@ class OpenAIService: ObservableObject {
     }
     
     private func buildPrompt(for poi: PointOfInterest, context: TourContext, preferences: UserPreferences) -> String {
-        // Use ContentGenerator for enhanced prompt building if available
-        if let contentGenerator = try? ContentGenerator.shared {
-            let template = selectPromptTemplate(for: poi, context: context, preferences: preferences)
-            return MultiLanguageSupport.shared.localizePrompt(
-                template: template,
-                for: poi,
-                context: context,
-                preferences: preferences
-            )
-        }
-        
-        // Fallback to basic prompt building
+        // Use basic prompt building (ContentGenerator removed due to MainActor isolation)
         return buildBasicPrompt(for: poi, context: context, preferences: preferences)
     }
     

@@ -3,7 +3,7 @@ import CoreLocation
 import SwiftData
 
 @Model
-final class Tour: @unchecked Sendable {
+final class Tour: @unchecked Sendable, Identifiable {
     var id: UUID
     var name: String
     var tourDescription: String
