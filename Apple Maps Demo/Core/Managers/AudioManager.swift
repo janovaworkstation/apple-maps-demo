@@ -3,6 +3,7 @@
 import Combine
 import UIKit
 import QuartzCore // For CACurrentMediaTime
+import CoreLocation
 
 // MARK: - AudioManager
 
@@ -61,6 +62,11 @@ final class AudioManager: NSObject, ObservableObject {
     private var predictiveQueue: [AudioQueueItem] = []
     private var preloadedContent: [UUID: AudioContent] = [:]
     private var cancellables = Set<AnyCancellable>()
+    
+    // MARK: - User Behavior Tracking
+    private var userSkipPatterns: [String: Int] = [:]
+    private var userListeningDuration: [UUID: TimeInterval] = [:]
+    private var userPreferredPlaybackTimes: [TimeInterval] = []
     
     // MARK: - Init / Deinit
     
@@ -265,21 +271,146 @@ final class AudioManager: NSObject, ObservableObject {
         switch update {
         case .downloadCompleted(let contentId):
             print("✅ Download completed for content: \(contentId)")
-            if let queueItem = predictiveQueue.first(where: { $0.poi.id == contentId }) {
-                print("🎯 Predictively loaded content ready: \(queueItem.poi.name)")
-            }
+            await handleDownloadCompletion(for: contentId)
+            
         case .downloadFailed(let contentId, let error):
             print("❌ Download failed for content: \(contentId) - \(error)")
+            
         case .fileDeleted(let contentId):
             preloadedContent.removeValue(forKey: contentId)
+            
         case .cacheCleared(let deletedFiles, let freedSpace):
             print("🧹 Cache cleared: \(deletedFiles) files, \(ByteCountFormatter().string(fromByteCount: freedSpace)) freed")
             preloadedContent.removeAll()
+            
         case .cacheOptimized(let deletedFiles, let freedSpace):
             print("⚡ Cache optimized: \(deletedFiles) files removed, \(ByteCountFormatter().string(fromByteCount: freedSpace)) freed")
+            
         @unknown default:
             break
         }
+    }
+    
+    // MARK: - Intelligent Fallback System
+    
+    private func handleDownloadCompletion(for contentId: UUID) async {
+        // Check if the completed download is for currently playing POI
+        if let currentPOI = currentPOI,
+           let audioContent = try? await getOrCreateAudioContent(for: currentPOI),
+           audioContent.id == contentId,
+           isPlaying {
+            
+            await performSeamlessTransitionToRealAudio(for: currentPOI)
+        }
+        
+        // Check predictive queue
+        if let queueItem = predictiveQueue.first(where: { $0.poi.id == contentId }) {
+            print("🎯 Predictively loaded content ready: \(queueItem.poi.name)")
+        }
+    }
+    
+    private func performSeamlessTransitionToRealAudio(for poi: PointOfInterest) async {
+        guard let currentSession = currentPlaybackSession else { return }
+        
+        do {
+            let audioContent = try await getOrCreateAudioContent(for: poi)
+            let localURL = audioStorageService.getLocalURL(for: audioContent)
+            
+            // Calculate current playback position for seamless transition
+            let currentPlaybackTime = currentTime
+            let realAudioDuration = try await getAudioDuration(from: localURL)
+            
+            // Map mock playback position to real audio position (proportional)
+            let transitionPosition = min(currentPlaybackTime, realAudioDuration)
+            
+            print("🔄 Transitioning from mock to real audio for \(poi.name) at position \(Int(transitionPosition))s")
+            
+            // Stop mock audio gracefully
+            mockTimer?.invalidate()
+            mockTimer = nil
+            
+            // Prepare real audio player
+            let realPlayer = try AVAudioPlayer(contentsOf: localURL)
+            realPlayer.delegate = self
+            realPlayer.prepareToPlay()
+            realPlayer.currentTime = transitionPosition
+            
+            // Crossfade if there's current audio, otherwise direct switch
+            if let currentPlayer = getCurrentPlayer(), currentPlayer.isPlaying {
+                await performCrossfadeToReal(from: currentPlayer, to: realPlayer)
+            } else {
+                // Set the real player as the active player
+                if activePlayer == .primary {
+                    primaryPlayer = realPlayer
+                } else {
+                    secondaryPlayer = realPlayer
+                }
+                realPlayer.play()
+                isPlaying = true
+            }
+            
+            // Update state
+            duration = realPlayer.duration
+            currentTime = transitionPosition
+            
+            currentPlaybackSession = AudioPlaybackSession(
+                id: UUID(),
+                poi: poi,
+                audioURL: localURL,
+                startTime: Date().addingTimeInterval(-transitionPosition),
+                isAutoTriggered: currentSession.isAutoTriggered
+            )
+            
+            audioContent.recordPlayback()
+            try await dataService.audioRepository.save(audioContent)
+            await updateNowPlayingInfo()
+            
+            print("✅ Seamlessly transitioned to real audio for \(poi.name)")
+            
+        } catch {
+            print("❌ Failed to transition to real audio: \(error)")
+        }
+    }
+    
+    private func getAudioDuration(from url: URL) async throws -> TimeInterval {
+        let asset = AVAsset(url: url)
+        let duration = try await asset.load(.duration)
+        return CMTimeGetSeconds(duration)
+    }
+    
+    private func performCrossfadeToReal(from oldPlayer: AVAudioPlayer, to newPlayer: AVAudioPlayer) async {
+        let crossfadeDuration: TimeInterval = 1.5 // Shorter for seamless transition
+        
+        newPlayer.volume = 0.0
+        newPlayer.play()
+        
+        let stepInterval: TimeInterval = 0.05
+        let steps = Int(crossfadeDuration / stepInterval)
+        _ = 1.0 / Float(steps) // Volume step calculation
+        
+        for step in 0...steps {
+            let progress = Float(step) / Float(steps)
+            
+            oldPlayer.volume = max(0.0, 1.0 - progress)
+            newPlayer.volume = min(1.0, progress)
+            
+            if step < steps {
+                try? await Task.sleep(nanoseconds: UInt64(stepInterval * 1_000_000_000))
+            }
+        }
+        
+        // Complete transition
+        oldPlayer.stop()
+        newPlayer.volume = volume
+        
+        // Set the new player as the active player
+        if activePlayer == .primary {
+            primaryPlayer = newPlayer
+        } else {
+            secondaryPlayer = newPlayer
+        }
+        
+        print("🔄 Seamless crossfade to real audio completed")
     }
     
     // MARK: - Player Management
@@ -343,16 +474,84 @@ final class AudioManager: NSObject, ObservableObject {
     // MARK: - Smart Audio Loading
     
     @MainActor func playAudioForPOI(_ poi: PointOfInterest) async throws {
+        try await playAudioWithUnifiedAccess(for: poi, priority: .critical)
+    }
+    
+    // MARK: - Unified File Access Layer
+    
+    private func playAudioWithUnifiedAccess(for poi: PointOfInterest, priority: DownloadPriority = .normal) async throws {
         let audioContent = try await getOrCreateAudioContent(for: poi)
+        
         if audioStorageService.isFileAvailable(for: audioContent) {
+            // Play real audio from local storage
             let localURL = audioStorageService.getLocalURL(for: audioContent)
             try await playAudio(from: localURL, for: poi)
             audioContent.recordPlayback()
             try await dataService.audioRepository.save(audioContent)
+            print("🎵 Playing cached audio for POI: \(poi.name)")
         } else {
-            print("📥 Audio not cached for POI: \(poi.name), initiating download")
-            try await audioStorageService.downloadAudio(audioContent, priority: .critical)
+            // Seamlessly fallback to mock audio while downloading
             await playMockAudioForPOI(poi)
+            
+            // Start background download for next time
+            Task {
+                try await audioStorageService.downloadAudio(audioContent, priority: priority)
+                print("📥 Started background download for POI: \(poi.name)")
+            }
+        }
+    }
+    
+    private func getAudioURLWithFallback(for audioContent: AudioContent, priority: DownloadPriority) async throws -> URL {
+        // 1. Check if file is already available locally
+        if audioStorageService.isFileAvailable(for: audioContent) {
+            return audioStorageService.getLocalURL(for: audioContent)
+        }
+        
+        // 2. Check if download is in progress
+        if audioStorageService.activeDownloads[audioContent.id] != nil {
+            print("📥 Download in progress for \(audioContent.poiId), using mock audio")
+            return URL(string: "mock://pending-download/\(audioContent.id)")!
+        }
+        
+        // 3. Start download and return mock URL
+        try await audioStorageService.downloadAudio(audioContent, priority: priority)
+        print("📥 Started download for \(audioContent.poiId), using mock audio")
+        return URL(string: "mock://downloading/\(audioContent.id)")!
+    }
+    
+    // Smart audio preloading with proximity detection
+    private func preloadNearbyAudio(userLocation: CLLocation, radius: CLLocationDistance = 1000) async {
+        guard let tour = currentTour else { return }
+        
+        do {
+            let allPOIs = try await dataService.poiRepository.fetchByTour(tour.id)
+            let nearbyPOIs = allPOIs.filter { poi in
+                poi.location.distance(from: userLocation) <= radius
+            }
+            
+            // Sort by proximity and importance
+            let prioritizedPOIs = nearbyPOIs.sorted { poi1, poi2 in
+                let distance1 = poi1.location.distance(from: userLocation)
+                let distance2 = poi2.location.distance(from: userLocation)
+                let score1 = Double(poi1.importance.priority) / max(distance1, 1.0)
+                let score2 = Double(poi2.importance.priority) / max(distance2, 1.0)
+                return score1 > score2
+            }
+            
+            // Preload top priority POIs
+            for poi in prioritizedPOIs.prefix(5) {
+                do {
+                    let audioContent = try await getOrCreateAudioContent(for: poi)
+                    guard !audioStorageService.isFileAvailable(for: audioContent) else { continue }
+                    try await audioStorageService.downloadAudio(audioContent, priority: .normal)
+                } catch {
+                    print("❌ Failed to preload audio for POI \(poi.name): \(error)")
+                }
+            }
+            
+            print("🎯 Preloaded audio for \(min(5, prioritizedPOIs.count)) nearby POIs")
+        } catch {
+            print("❌ Failed to preload nearby audio: \(error)")
         }
     }
     
@@ -606,6 +805,9 @@ extension AudioManager {
                 tourType: currentTour?.tourType
             )
             playbackHistory.append(record)
+            
+            // Track listening duration for queue optimization
+            recordListeningDuration(for: session.poi, duration: duration)
         }
         currentPlaybackSession = nil
         currentPOI = nil
@@ -660,8 +862,16 @@ extension AudioManager {
     
     func skipForward(_ seconds: TimeInterval = 30) {
         let newTime = min(currentTime + seconds, duration)
+        
+        // Track user skip behavior for queue optimization
+        if let poi = currentPOI {
+            recordUserSkip(for: poi)
+            optimizeCurrentQueue() // Dynamically adjust queue based on behavior
+        }
+        
         seek(to: newTime)
     }
+    
     func skipBackward(_ seconds: TimeInterval = 30) {
         let newTime = max(currentTime - seconds, 0)
         seek(to: newTime)
@@ -689,9 +899,104 @@ extension AudioManager {
     // MARK: - Queue Management
     
     func queueAudio(_ items: [AudioQueueItem]) {
-        audioQueue = items
+        audioQueue = optimizeQueueOrder(items)
         currentQueueIndex = 0
         playNextInQueue()
+    }
+    
+    // MARK: - Smart Queue Management
+    
+    private func optimizeQueueOrder(_ items: [AudioQueueItem]) -> [AudioQueueItem] {
+        // Apply intelligent multi-factor prioritization
+        return items.sorted { item1, item2 in
+            let score1 = calculateQueuePriority(for: item1)
+            let score2 = calculateQueuePriority(for: item2)
+            return score1 > score2
+        }
+    }
+    
+    private func calculateQueuePriority(for item: AudioQueueItem) -> Double {
+        var score: Double = 0.0
+        
+        // Factor 1: POI importance (weight: 40%)
+        score += Double(item.poi.importance.priority) * 40.0
+        
+        // Factor 2: Download availability (weight: 30%)
+        // Note: This would need async context, simplified check for now
+        if let audioContent = item.poi.audioContent,
+           audioStorageService.isFileAvailable(for: audioContent) {
+            score += 30.0
+        }
+        
+        // Factor 3: User behavior patterns (weight: 20%)
+        score += calculateUserBehaviorScore(for: item) * 20.0
+        
+        // Factor 4: Tour order maintenance (weight: 10%)
+        let tourOrderBonus = Double(max(0, 100 - item.poi.order)) / 100.0 * 10.0
+        score += tourOrderBonus
+        
+        return score
+    }
+    
+    private func calculateUserBehaviorScore(for item: AudioQueueItem) -> Double {
+        var behaviorScore: Double = 0.5 // Neutral baseline
+        
+        // Analyze skip patterns
+        let poiCategory = item.poi.category.rawValue
+        if let skipCount = userSkipPatterns[poiCategory] {
+            behaviorScore -= Double(skipCount) * 0.1
+        }
+        
+        // Analyze listening duration history
+        if let avgDuration = userListeningDuration[item.poi.id] {
+            let expectedDuration = item.poi.estimatedVisitDuration
+            let completionRate = avgDuration / expectedDuration
+            behaviorScore += min(completionRate, 1.0) * 0.5
+        }
+        
+        return max(0.0, min(1.0, behaviorScore))
+    }
+    
+    // Track user behavior for queue optimization
+    private func recordUserSkip(for poi: PointOfInterest) {
+        let category = poi.category.rawValue
+        userSkipPatterns[category, default: 0] += 1
+        print("📊 Recorded skip for category: \(category) (total: \(userSkipPatterns[category] ?? 0))")
+    }
+    
+    private func recordListeningDuration(for poi: PointOfInterest, duration: TimeInterval) {
+        userListeningDuration[poi.id] = duration
+        userPreferredPlaybackTimes.append(duration)
+        
+        // Keep only recent listening times (last 20 sessions)
+        if userPreferredPlaybackTimes.count > 20 {
+            userPreferredPlaybackTimes.removeFirst()
+        }
+        
+        print("📊 Recorded listening duration for \(poi.name): \(Int(duration))s")
+    }
+    
+    private func isAudioAvailable(for poi: PointOfInterest) async -> Bool {
+        do {
+            let audioContent = try await getOrCreateAudioContent(for: poi)
+            return audioStorageService.isFileAvailable(for: audioContent)
+        } catch {
+            return false
+        }
+    }
+    
+    func optimizeCurrentQueue() {
+        guard !audioQueue.isEmpty else { return }
+        
+        // Keep current item, optimize remaining queue
+        let currentItem = audioQueue[currentQueueIndex]
+        let remainingItems = Array(audioQueue[(currentQueueIndex + 1)...])
+        let optimizedRemaining = optimizeQueueOrder(remainingItems)
+        
+        // Rebuild queue with current item + optimized remaining
+        audioQueue = [currentItem] + optimizedRemaining
+        
+        print("🎯 Queue optimized: \(audioQueue.count) items reordered")
     }
     
     private func playNextInQueue() {
