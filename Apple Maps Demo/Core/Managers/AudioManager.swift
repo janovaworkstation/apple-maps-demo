@@ -9,7 +9,7 @@ import CoreLocation
 
 @MainActor
 final class AudioManager: NSObject, ObservableObject {
-    static let shared = AudioManager(audioStorageService: nil, dataService: nil)
+    static let shared = AudioManager(audioStorageService: nil, dataService: nil, hybridContentManager: nil)
     
     // MARK: - Audio Players (Dual System for Crossfading)
     private var primaryPlayer: AVAudioPlayer?
@@ -57,6 +57,7 @@ final class AudioManager: NSObject, ObservableObject {
     // MARK: - Dependencies
     private let audioStorageService: AudioStorageService
     private let dataService: DataService
+    private let hybridContentManager: HybridContentManager
     
     // MARK: - Predictive Loading
     private var predictiveQueue: [AudioQueueItem] = []
@@ -67,16 +68,19 @@ final class AudioManager: NSObject, ObservableObject {
     private var userSkipPatterns: [String: Int] = [:]
     private var userListeningDuration: [UUID: TimeInterval] = [:]
     private var userPreferredPlaybackTimes: [TimeInterval] = []
+    private var lastPlayedPOI: PointOfInterest?
     
     // MARK: - Init / Deinit
     
     init(
         audioStorageService: AudioStorageService? = nil,
-        dataService: DataService? = nil
+        dataService: DataService? = nil,
+        hybridContentManager: HybridContentManager? = nil
     ) {
         self.audioSession = AVAudioSession.sharedInstance()
         self.audioStorageService = audioStorageService ?? AudioStorageService.shared
         self.dataService = dataService ?? DataService.shared
+        self.hybridContentManager = hybridContentManager ?? HybridContentManager.shared
         super.init()
         
         Task { @MainActor in
@@ -518,23 +522,64 @@ final class AudioManager: NSObject, ObservableObject {
     // MARK: - Unified File Access Layer
     
     private func playAudioWithUnifiedAccess(for poi: PointOfInterest, priority: DownloadPriority = .normal) async throws {
-        let audioContent = try await getOrCreateAudioContent(for: poi)
+        // Get current user preferences (in a real app this would come from user settings)
+        let userPreferences = UserPreferences()
+        userPreferences.preferredLanguage = "en"
+        userPreferences.autoplayEnabled = true
+        userPreferences.offlineMode = false
+        userPreferences.voiceSpeed = 1.0
+        userPreferences.voiceType = .natural
         
-        if audioStorageService.isFileAvailable(for: audioContent) {
-            // Play real audio from local storage
-            let localURL = audioStorageService.getLocalURL(for: audioContent)
-            try await playAudio(from: localURL, for: poi)
-            audioContent.recordPlayback()
-            try await dataService.audioRepository.save(audioContent)
-            print("🎵 Playing cached audio for POI: \(poi.name)")
-        } else {
-            // Seamlessly fallback to mock audio while downloading
-            await playMockAudioForPOI(poi)
+        // Create tour context
+        let tourContext = TourContext(
+            tourName: currentTour?.name ?? "Default Tour",
+            previousPOI: lastPlayedPOI?.name,
+            elapsedTime: Int(Date().timeIntervalSince(currentTour?.createdAt ?? Date())),
+            visitedPOIs: playbackHistory.map { $0.poiName }
+        )
+        
+        do {
+            // Use HybridContentManager to get the best available content
+            let generatedContent = try await hybridContentManager.getContent(
+                for: poi,
+                context: tourContext,
+                preferences: userPreferences,
+                strategy: .automatic
+            )
             
-            // Start background download for next time
-            Task {
-                try await audioStorageService.downloadAudio(audioContent, priority: priority)
-                print("📥 Started background download for POI: \(poi.name)")
+            // Play the audio content
+            try await playAudio(from: generatedContent.audioURL, for: poi)
+            
+            // Update playback tracking
+            lastPlayedPOI = poi
+            if var session = currentPlaybackSession {
+                session.transcript = generatedContent.text
+                session.source = hybridContentManager.currentContentSource.rawValue
+                currentPlaybackSession = session
+            }
+            
+            print("✅ Playing \(hybridContentManager.currentContentSource.description) content for \(poi.name)")
+            
+        } catch {
+            print("❌ HybridContentManager failed for \(poi.name): \(error)")
+            
+            // Fallback to original system
+            let audioContent = try await getOrCreateAudioContent(for: poi)
+            
+            if audioStorageService.isFileAvailable(for: audioContent) {
+                let localURL = audioStorageService.getLocalURL(for: audioContent)
+                try await playAudio(from: localURL, for: poi)
+                audioContent.recordPlayback()
+                try await dataService.audioRepository.save(audioContent)
+                print("🎵 Playing cached audio for POI: \(poi.name)")
+            } else {
+                // Seamlessly fallback to mock audio while downloading
+                await playMockAudioForPOI(poi)
+                
+                Task {
+                    try await audioStorageService.downloadAudio(audioContent, priority: priority)
+                    print("📥 Started background download for POI: \(poi.name)")
+                }
             }
         }
     }
@@ -1238,6 +1283,8 @@ struct AudioPlaybackSession {
     let audioURL: URL
     let startTime: Date
     let isAutoTriggered: Bool
+    var transcript: String?
+    var source: String?
     var duration: TimeInterval { Date().timeIntervalSince(startTime) }
 }
 
