@@ -22,6 +22,9 @@ final class Tour: @unchecked Sendable {
     var authorName: String?
     var version: String
     var tags: [String]
+    var tourType: TourType
+    var maxSpeed: Double? // Maximum expected speed for this tour (mph)
+    var dwellTimeOverride: TimeInterval? // Custom dwell time if different from tour type default
     
     init(
         id: UUID = UUID(),
@@ -33,7 +36,10 @@ final class Tour: @unchecked Sendable {
         category: TourCategory = .general,
         totalDistance: CLLocationDistance = 0,
         difficulty: TourDifficulty = .easy,
-        authorName: String? = nil
+        authorName: String? = nil,
+        tourType: TourType = .walking,
+        maxSpeed: Double? = nil,
+        dwellTimeOverride: TimeInterval? = nil
     ) {
         self.id = id
         self.name = name
@@ -52,6 +58,9 @@ final class Tour: @unchecked Sendable {
         self.authorName = authorName
         self.version = "1.0"
         self.tags = []
+        self.tourType = tourType
+        self.maxSpeed = maxSpeed ?? tourType.defaultMaxSpeed
+        self.dwellTimeOverride = dwellTimeOverride
     }
 }
 
@@ -112,6 +121,28 @@ extension Tour {
     
     var averageRating: String {
         return String(format: "%.1f", rating)
+    }
+    
+    // MARK: - Tour Type Properties
+    
+    var effectiveDwellTime: TimeInterval {
+        return dwellTimeOverride ?? tourType.defaultDwellTime
+    }
+    
+    var effectiveMaxSpeed: Double {
+        return maxSpeed ?? tourType.defaultMaxSpeed
+    }
+    
+    var recommendedGeofenceRadius: CLLocationDistance {
+        return tourType.defaultGeofenceRadius
+    }
+    
+    var supportsContinuousMovement: Bool {
+        return tourType == .driving || tourType == .mixed
+    }
+    
+    var requiresSpeedBasedValidation: Bool {
+        return tourType != .walking
     }
     
     // MARK: - Validation Methods
@@ -204,11 +235,26 @@ extension Tour {
     }
     
     func estimateDuration() {
-        // Base time: 2 minutes per POI for content + walking time based on distance
-        let contentTime = TimeInterval(pointsOfInterest.count * 120) // 2 minutes per POI
-        let walkingTime = totalDistance / 1.4 // Average walking speed 1.4 m/s
+        // Base time varies by tour type
+        let contentTimePerPOI = tourType.estimatedContentTimePerPOI
+        let contentTime = TimeInterval(pointsOfInterest.count) * contentTimePerPOI
         
-        estimatedDuration = contentTime + walkingTime
+        // Travel time based on tour type
+        let travelTime: TimeInterval
+        switch tourType {
+        case .walking:
+            travelTime = totalDistance / 1.4 // Average walking speed 1.4 m/s
+        case .driving:
+            // Assume 25 mph average for city driving (11.2 m/s)
+            travelTime = totalDistance / 11.2
+        case .mixed:
+            // Weighted average: 70% driving, 30% walking
+            let drivingTime = totalDistance / 11.2
+            let walkingTime = totalDistance / 1.4
+            travelTime = (drivingTime * 0.7) + (walkingTime * 0.3)
+        }
+        
+        estimatedDuration = contentTime + travelTime
         updateLastModified()
     }
     
@@ -289,6 +335,108 @@ enum TourDifficulty: String, Codable, CaseIterable {
         case .moderate: return "Requires basic fitness level"
         case .challenging: return "Requires good fitness level"
         case .expert: return "Requires excellent fitness level"
+        }
+    }
+}
+
+enum TourType: String, Codable, CaseIterable {
+    case walking = "Walking"
+    case driving = "Driving" 
+    case mixed = "Mixed"
+    
+    var iconName: String {
+        switch self {
+        case .walking: return "figure.walk"
+        case .driving: return "car.fill"
+        case .mixed: return "figure.walk.circle"
+        }
+    }
+    
+    var color: String {
+        switch self {
+        case .walking: return "green"
+        case .driving: return "blue"
+        case .mixed: return "purple"
+        }
+    }
+    
+    var description: String {
+        switch self {
+        case .walking: return "Explore on foot with detailed stops"
+        case .driving: return "Scenic driving route with audio commentary"
+        case .mixed: return "Combined walking and driving experience"
+        }
+    }
+    
+    /// Default dwell time required for a valid visit (seconds)
+    var defaultDwellTime: TimeInterval {
+        switch self {
+        case .walking: return 30.0 // 30 seconds for walking tours
+        case .driving: return 5.0  // 5 seconds for driving tours
+        case .mixed: return 15.0   // 15 seconds for mixed tours
+        }
+    }
+    
+    /// Default maximum expected speed (mph)
+    var defaultMaxSpeed: Double {
+        switch self {
+        case .walking: return 5.0   // 5 mph walking/jogging
+        case .driving: return 45.0  // 45 mph city driving
+        case .mixed: return 25.0    // 25 mph mixed scenarios
+        }
+    }
+    
+    /// Default geofence radius (meters)
+    var defaultGeofenceRadius: CLLocationDistance {
+        switch self {
+        case .walking: return 75.0   // 75 meters for walking
+        case .driving: return 300.0  // 300 meters for driving
+        case .mixed: return 150.0    // 150 meters for mixed
+        }
+    }
+    
+    /// Estimated content time per POI (seconds)
+    var estimatedContentTimePerPOI: TimeInterval {
+        switch self {
+        case .walking: return 180.0  // 3 minutes per POI for walking
+        case .driving: return 90.0   // 1.5 minutes per POI for driving
+        case .mixed: return 135.0    // 2.25 minutes per POI for mixed
+        }
+    }
+    
+    /// Speed threshold for automatic tour type detection (mph)
+    var speedThresholds: (min: Double, max: Double) {
+        switch self {
+        case .walking: return (0.0, 8.0)     // 0-8 mph
+        case .driving: return (15.0, 80.0)   // 15-80 mph  
+        case .mixed: return (5.0, 25.0)      // 5-25 mph
+        }
+    }
+    
+    /// Minimum validation interval (seconds)
+    var validationInterval: TimeInterval {
+        switch self {
+        case .walking: return 5.0   // Check every 5 seconds
+        case .driving: return 2.0   // Check every 2 seconds (faster response)
+        case .mixed: return 3.0     // Check every 3 seconds
+        }
+    }
+    
+    /// Whether this tour type supports "drive-by" visits (no stopping required)
+    var supportsDriveByVisits: Bool {
+        switch self {
+        case .walking: return false
+        case .driving: return true
+        case .mixed: return true
+        }
+    }
+    
+    /// Accuracy threshold required for valid GPS readings (meters)
+    var requiredGPSAccuracy: CLLocationAccuracy {
+        switch self {
+        case .walking: return 15.0   // 15 meters for walking
+        case .driving: return 25.0   // 25 meters for driving (less strict)
+        case .mixed: return 20.0     // 20 meters for mixed
         }
     }
 }

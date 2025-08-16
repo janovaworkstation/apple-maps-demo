@@ -24,7 +24,8 @@ struct TourMapView: View {
                     POIMarker(
                         poi: poi,
                         isVisited: poi.isVisited,
-                        isSelected: mapSelection == poi.id.uuidString
+                        isSelected: mapSelection == poi.id.uuidString,
+                        viewModel: viewModel
                     )
                     .onTapGesture {
                         selectedPOI = poi
@@ -66,14 +67,49 @@ struct POIMarker: View {
     let poi: PointOfInterest
     let isVisited: Bool
     let isSelected: Bool
+    @ObservedObject var viewModel: MapViewModel
+    
+    // Phase 4: Enhanced marker state
+    private var isInActiveSession: Bool {
+        viewModel.currentVisitSession?.poi.id == poi.id
+    }
+    
+    private var markerColor: Color {
+        if isInActiveSession {
+            return .orange
+        } else if isVisited {
+            return .green
+        } else {
+            return .blue
+        }
+    }
+    
+    private var markerIcon: String {
+        if isInActiveSession {
+            return "location.fill"
+        } else if isVisited {
+            return "checkmark.circle.fill"
+        } else {
+            return "mappin.circle.fill"
+        }
+    }
     
     var body: some View {
         ZStack {
+            // Phase 4: Animated visit session indicator
+            if isInActiveSession {
+                Circle()
+                    .fill(Color.orange.opacity(0.3))
+                    .frame(width: 50, height: 50)
+                    .scaleEffect(1.0)
+                    .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isInActiveSession)
+            }
+            
             Circle()
-                .fill(isVisited ? Color.green : Color.blue)
+                .fill(markerColor)
                 .frame(width: 30, height: 30)
             
-            Image(systemName: isVisited ? "checkmark.circle.fill" : "mappin.circle.fill")
+            Image(systemName: markerIcon)
                 .foregroundColor(.white)
                 .font(.system(size: 20))
             
@@ -85,6 +121,7 @@ struct POIMarker: View {
         }
         .scaleEffect(isSelected ? 1.2 : 1.0)
         .animation(.easeInOut(duration: 0.2), value: isSelected)
+        .animation(.easeInOut(duration: 0.3), value: isInActiveSession)
     }
 }
 
@@ -105,19 +142,56 @@ struct TourStatusBar: View {
             .background(.ultraThinMaterial)
             .cornerRadius(8)
             
-            // Tour progress
+            // Phase 4: Enhanced tour progress with geofencing status
             if viewModel.currentTour != nil {
                 HStack(spacing: 6) {
-                    Image(systemName: "mappin.and.ellipse")
-                        .foregroundColor(.blue)
+                    Image(systemName: viewModel.isGeofencingActive ? "location.fill" : "mappin.and.ellipse")
+                        .foregroundColor(viewModel.isGeofencingActive ? .green : .blue)
                     Text("\(viewModel.visitedPOIs.count)/\(viewModel.pointsOfInterest.count)")
                         .font(.caption)
                         .fontWeight(.medium)
+                    
+                    if viewModel.isGeofencingActive {
+                        Image(systemName: "shield.fill")
+                            .foregroundColor(.green)
+                            .font(.caption2)
+                    }
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
                 .background(.ultraThinMaterial)
                 .cornerRadius(8)
+            }
+            
+            // Phase 4: Active visit session indicator
+            if let session = viewModel.currentVisitSession {
+                HStack(spacing: 6) {
+                    Image(systemName: "timer")
+                        .foregroundColor(.orange)
+                    Text("Visiting \(session.poi.name)")
+                        .font(.caption2)
+                        .fontWeight(.medium)
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.orange.opacity(0.2))
+                .cornerRadius(8)
+                .animation(.easeInOut(duration: 0.3), value: session.id)
+            }
+            
+            // Phase 4: Geofence monitoring status
+            if !viewModel.monitoredRegions.isEmpty {
+                HStack(spacing: 4) {
+                    Image(systemName: "location.circle")
+                        .foregroundColor(.purple)
+                    Text("\(viewModel.monitoredRegions.count) monitored")
+                        .font(.caption2)
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(.ultraThinMaterial)
+                .cornerRadius(6)
             }
         }
         .padding()

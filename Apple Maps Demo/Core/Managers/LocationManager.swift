@@ -71,10 +71,11 @@ class LocationManager: NSObject, ObservableObject {
         locationManager.showsBackgroundLocationIndicator = false
     }
     
-    func startMonitoring(poi: PointOfInterest) {
+    func startMonitoring(poi: PointOfInterest, radius: CLLocationDistance? = nil) {
+        let effectiveRadius = radius ?? poi.radius
         let region = CLCircularRegion(
             center: poi.coordinate,
-            radius: poi.radius,
+            radius: effectiveRadius,
             identifier: poi.id.uuidString
         )
         
@@ -83,6 +84,8 @@ class LocationManager: NSObject, ObservableObject {
         
         regionMonitors[poi.id.uuidString] = region
         locationManager.startMonitoring(for: region)
+        
+        print("📍 Started monitoring POI '\(poi.name)' with radius \(effectiveRadius)m")
     }
     
     func stopMonitoring(poi: PointOfInterest) {

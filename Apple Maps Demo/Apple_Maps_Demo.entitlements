@@ -2,32 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <!-- CarPlay Entitlements - Requires Apple approval -->
-    <!-- Uncomment these after receiving CarPlay entitlement from Apple
-    <key>com.apple.developer.carplay-audio</key>
-    <true/>
-    <key>com.apple.developer.playable-content</key>
-    <true/>
-    -->
+    <!-- Minimal entitlements for basic app functionality -->
     
-    <!-- Network Access for API calls -->
-    <key>com.apple.security.network.client</key>
-    <true/>
-    <key>com.apple.security.network.server</key>
-    <true/>
-    
-    <!-- File Access for Audio Storage -->
-    <key>com.apple.security.files.user-selected.read-write</key>
-    <true/>
-    <key>com.apple.security.files.downloads.read-write</key>
-    <true/>
-    
-    <!-- Location Services -->
+    <!-- Location Services (required for map and geofencing) -->
     <key>com.apple.security.personal-information.location</key>
-    <true/>
-    
-    <!-- Audio Background Mode -->
-    <key>com.apple.security.device.audio-input</key>
     <true/>
 </dict>
 </plist>
