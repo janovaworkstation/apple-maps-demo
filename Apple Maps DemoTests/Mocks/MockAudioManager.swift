@@ -109,7 +109,7 @@ final class MockAudioManager: ObservableObject {
     
     func playAudioForPOI(_ poi: PointOfInterest) async throws {
         currentPOI = poi
-        duration = poi.audioContent.duration
+        duration = poi.audioContent?.duration ?? 0
         try await play()
     }
     

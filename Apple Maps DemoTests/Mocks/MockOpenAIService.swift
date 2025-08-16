@@ -54,15 +54,12 @@ final class MockOpenAIService {
         
         return AudioContent(
             id: UUID(),
-            localFileURL: nil,
-            transcript: mockTextResponse,
+            poiId: poi.id,
             duration: 120,
-            isLLMGenerated: true,
-            cachedAt: Date(),
             language: preferences.preferredLanguage,
-            quality: .medium,
-            fileSize: mockAudioData.count,
-            format: .mp3
+            isLLMGenerated: true,
+            format: .mp3,
+            quality: .medium
         )
     }
     
