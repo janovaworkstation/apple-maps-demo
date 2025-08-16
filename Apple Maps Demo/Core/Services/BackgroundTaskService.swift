@@ -376,9 +376,9 @@ class BackgroundTaskService: BackgroundTaskServiceProtocol, ObservableObject {
         // Ensure previous task is ended before starting new one
         endBackgroundTask()
         
-        backgroundTaskIdentifier = UIApplication.shared.beginBackgroundTask(withName: "LocationProcessing") {
+        backgroundTaskIdentifier = UIApplication.shared.beginBackgroundTask(withName: "LocationProcessing") { [weak self] in
             print("⏰ Background task expired, ending automatically")
-            self.endBackgroundTask()
+            self?.endBackgroundTask()
         }
         
         if backgroundTaskIdentifier == .invalid {
