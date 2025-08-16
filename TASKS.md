@@ -88,8 +88,8 @@ Apple Maps Demo/
 
 ## Phase 3: Core Models & Data Layer
 
-### 3.1 Data Models
-- [ ] Create `Tour` model:
+### 3.1 Data Models ✅
+- [x] Create `Tour` model:
   ```swift
   - id: UUID
   - name: String
@@ -101,7 +101,7 @@ Apple Maps Demo/
   - lastModified: Date
   ```
 
-- [ ] Create `PointOfInterest` model:
+- [x] Create `PointOfInterest` model:
   ```swift
   - id: UUID
   - tourId: UUID
@@ -113,7 +113,7 @@ Apple Maps Demo/
   - order: Int
   ```
 
-- [ ] Create `AudioContent` model:
+- [x] Create `AudioContent` model:
   ```swift
   - id: UUID
   - poiId: UUID
@@ -125,7 +125,7 @@ Apple Maps Demo/
   - language: String
   ```
 
-- [ ] Create `UserPreferences` model:
+- [x] Create `UserPreferences` model:
   ```swift
   - preferredLanguage: String
   - autoplayEnabled: Bool
@@ -134,12 +134,14 @@ Apple Maps Demo/
   - voiceType: String
   ```
 
-### 3.2 Core Data Setup
-- [ ] Create Core Data model file (.xcdatamodeld)
-- [ ] Define entities and relationships
-- [ ] Implement CoreDataManager for CRUD operations
-- [ ] Add migration support
-- [ ] Implement data persistence layer
+### 3.2 Core Data Setup ✅
+- [x] Create Core Data model file (.xcdatamodeld) - Using SwiftData
+- [x] Define entities and relationships
+- [x] Implement DataManager for CRUD operations
+- [x] Implement Repository pattern (TourRepository, POIRepository, AudioContentRepository, UserPreferencesRepository)
+- [x] Add migration support (DataMigrationManager)
+- [x] Implement comprehensive data persistence layer (DataService)
+- [x] Create error handling and validation system
 
 ## Phase 4: Location & Geofencing System
 

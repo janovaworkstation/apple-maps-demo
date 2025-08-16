@@ -42,8 +42,6 @@ struct TourMapView: View {
         .mapStyle(.standard(elevation: .realistic))
         .mapControls {
             MapUserLocationButton()
-            MapCompass()
-            MapScaleView()
         }
         .sheet(isPresented: $showingPOIDetail) {
             if let poi = selectedPOI {
@@ -52,7 +50,7 @@ struct TourMapView: View {
                     .presentationDragIndicator(.visible)
             }
         }
-        .overlay(alignment: .top) {
+        .overlay(alignment: .topLeading) {
             TourStatusBar(viewModel: viewModel)
         }
         .onAppear {
@@ -94,7 +92,7 @@ struct TourStatusBar: View {
     @ObservedObject var viewModel: MapViewModel
     
     var body: some View {
-        HStack {
+        VStack(alignment: .leading, spacing: 8) {
             // Connection status
             HStack(spacing: 4) {
                 Image(systemName: viewModel.isOnline ? "wifi" : "wifi.slash")
@@ -107,17 +105,17 @@ struct TourStatusBar: View {
             .background(.ultraThinMaterial)
             .cornerRadius(8)
             
-            Spacer()
-            
             // Tour progress
-            if let tour = viewModel.currentTour {
-                HStack(spacing: 4) {
-                    Text("\(viewModel.visitedPOIs.count)/\(tour.pointsOfInterest.count)")
-                        .font(.caption)
+            if viewModel.currentTour != nil {
+                HStack(spacing: 6) {
                     Image(systemName: "mappin.and.ellipse")
+                        .foregroundColor(.blue)
+                    Text("\(viewModel.visitedPOIs.count)/\(viewModel.pointsOfInterest.count)")
+                        .font(.caption)
+                        .fontWeight(.medium)
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
                 .background(.ultraThinMaterial)
                 .cornerRadius(8)
             }

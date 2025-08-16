@@ -18,7 +18,7 @@ class MapViewModel: ObservableObject {
     
     init() {
         setupBindings()
-        loadMockData()
+        // Load mock data once we have location
     }
     
     private func setupBindings() {
@@ -27,6 +27,12 @@ class MapViewModel: ObservableObject {
             .sink { [weak self] location in
                 self?.userLocation = location
                 self?.updateCameraIfNeeded(for: location)
+                
+                // Load mock POIs near user location if we haven't already
+                if self?.pointsOfInterest.isEmpty == true, let userLocation = location {
+                    self?.loadMockDataNear(location: userLocation)
+                }
+                
                 self?.checkNearbyPOIs(location: location)
             }
             .store(in: &cancellables)
@@ -134,28 +140,31 @@ class MapViewModel: ObservableObject {
     
     // MARK: - Mock Data
     
-    private func loadMockData() {
-        // Create sample tour with POIs
+    private func loadMockDataNear(location: CLLocation) {
+        // Create sample tour with POIs near user location
         let tour = Tour(
-            name: "Historic Downtown Tour",
-            description: "Explore the historic landmarks of downtown",
+            name: "Local Area Tour",
+            description: "Explore the landmarks near your current location",
             estimatedDuration: 3600
         )
         
+        // Create POIs with small offsets from user location (about 100-200 meters)
+        let userCoord = location.coordinate
+        
         let poi1 = PointOfInterest(
             tourId: tour.id,
-            name: "City Hall",
-            description: "Built in 1890, this historic building...",
-            latitude: 37.7749,
-            longitude: -122.4194
+            name: "Local Point of Interest",
+            description: "An interesting location near your current position",
+            latitude: userCoord.latitude + 0.001, // ~100m north
+            longitude: userCoord.longitude + 0.001 // ~100m east
         )
         
         let poi2 = PointOfInterest(
             tourId: tour.id,
-            name: "Central Park",
-            description: "A beautiful green space in the heart of the city...",
-            latitude: 37.7751,
-            longitude: -122.4180,
+            name: "Nearby Landmark",
+            description: "Another landmark within walking distance",
+            latitude: userCoord.latitude - 0.0015, // ~150m south
+            longitude: userCoord.longitude + 0.0005, // ~50m east
             order: 1
         )
         
@@ -165,5 +174,7 @@ class MapViewModel: ObservableObject {
         // Create route polyline
         let coordinates = pointsOfInterest.map { $0.coordinate }
         tourRoute = MKPolyline(coordinates: coordinates, count: coordinates.count)
+        
+        print("Created \(pointsOfInterest.count) POIs near user location: \(userCoord)")
     }
 }

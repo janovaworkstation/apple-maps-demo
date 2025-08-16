@@ -62,12 +62,8 @@ class LocationManager: NSObject, ObservableObject {
             return
         }
         
-        do {
-            locationManager.allowsBackgroundLocationUpdates = true
-            locationManager.showsBackgroundLocationIndicator = true
-        } catch {
-            print("Failed to enable background location updates: \(error)")
-        }
+        locationManager.allowsBackgroundLocationUpdates = true
+        locationManager.showsBackgroundLocationIndicator = true
     }
     
     func disableBackgroundLocationUpdates() {
