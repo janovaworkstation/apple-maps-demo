@@ -31,7 +31,14 @@ class OpenAIService: ObservableObject {
         
         let prompt = buildPrompt(for: poi, context: context, preferences: preferences)
         let text = try await generateText(prompt: prompt)
-        let audioURL = try await generateSpeech(text: text, voice: preferences.voiceType.openAIVoice)
+        
+        // Use optimal voice for language
+        let optimalVoice = MultiLanguageSupport.shared.getOptimalVoiceForLanguage(preferences.preferredLanguage)
+        let audioURL = try await generateSpeech(
+            text: text, 
+            voice: optimalVoice, 
+            language: preferences.preferredLanguage
+        )
         
         return GeneratedContent(text: text, audioURL: audioURL)
     }
@@ -66,7 +73,7 @@ class OpenAIService: ObservableObject {
         return completion.choices.first?.message.content ?? ""
     }
     
-    private func generateSpeech(text: String, voice: String) async throws -> URL {
+    private func generateSpeech(text: String, voice: String, language: String = "en") async throws -> URL {
         let endpoint = "\(baseURL)/audio/speech"
         var request = URLRequest(url: URL(string: endpoint)!)
         request.httpMethod = "POST"
@@ -99,6 +106,48 @@ class OpenAIService: ObservableObject {
     }
     
     private func buildPrompt(for poi: PointOfInterest, context: TourContext, preferences: UserPreferences) -> String {
+        // Use ContentGenerator for enhanced prompt building if available
+        if let contentGenerator = try? ContentGenerator.shared {
+            let template = selectPromptTemplate(for: poi, context: context, preferences: preferences)
+            return MultiLanguageSupport.shared.localizePrompt(
+                template: template,
+                for: poi,
+                context: context,
+                preferences: preferences
+            )
+        }
+        
+        // Fallback to basic prompt building
+        return buildBasicPrompt(for: poi, context: context, preferences: preferences)
+    }
+    
+    private func selectPromptTemplate(
+        for poi: PointOfInterest,
+        context: TourContext,
+        preferences: UserPreferences
+    ) -> PromptTemplate {
+        
+        switch poi.category {
+        case .landmark, .monument:
+            return HistoricalPromptTemplate()
+        case .museum:
+            return CulturalPromptTemplate()
+        case .restaurant:
+            return CulinaryPromptTemplate()
+        case .park, .viewpoint:
+            return NaturalPromptTemplate()
+        case .building:
+            return ArchitecturalPromptTemplate()
+        case .general:
+            return context.visitedPOIs.count > 2 ? 
+                PersonalizedPromptTemplate() : 
+                GeneralPromptTemplate()
+        default:
+            return GeneralPromptTemplate()
+        }
+    }
+    
+    private func buildBasicPrompt(for poi: PointOfInterest, context: TourContext, preferences: UserPreferences) -> String {
         """
         Generate engaging audio narration for a tour stop at "\(poi.name)".
         

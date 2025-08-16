@@ -80,10 +80,11 @@ final class AudioManager: NSObject, ObservableObject {
         super.init()
         
         Task { @MainActor in
-            await setupProfessionalAudioSession()
             await setupRemoteCommandCenter()
             await setupAudioSessionObservers()
             await setupPredictiveLoading()
+            // Setup audio session after other components are ready
+            await setupProfessionalAudioSession()
         }
     }
     
@@ -101,27 +102,64 @@ final class AudioManager: NSObject, ObservableObject {
     // MARK: - Professional Audio Session Configuration
     
     private func setupProfessionalAudioSession() async {
+        // Check if already configured
+        guard currentAudioSession != .active else {
+            print("ℹ️ Audio session already active, skipping setup")
+            return
+        }
+        
         do {
-            try audioSession.setCategory(
-                .playback,
-                mode: .default,
-                options: [
-                    .mixWithOthers,
-                    .duckOthers,
-                    .allowBluetooth,
-                    .allowAirPlay,
-                    .defaultToSpeaker
-                ]
-            )
-            try audioSession.setPreferredSampleRate(44100.0)   // CD quality
-            try audioSession.setPreferredIOBufferDuration(0.02) // 20ms buffer
+            // Deactivate session first to ensure clean state
+            if audioSession.isOtherAudioPlaying {
+                print("ℹ️ Other audio is playing, not deactivating")
+            } else {
+                try? audioSession.setActive(false, options: .notifyOthersOnDeactivation)
+            }
+            
+            // Set basic category first
+            try audioSession.setCategory(.playback, mode: .default)
+            
+            // Try to activate with basic configuration
             try audioSession.setActive(true)
+            
+            // On iOS simulator or certain devices, some options may not be supported
+            // Only try to add options if we're on a real device
+            #if !targetEnvironment(simulator)
+            // Try to add options one by one to identify which causes issues
+            var successfulOptions: AVAudioSession.CategoryOptions = []
+            
+            // Test each option individually
+            let optionsToTest: [(AVAudioSession.CategoryOptions, String)] = [
+                (.allowBluetooth, "Bluetooth"),
+                (.allowAirPlay, "AirPlay")
+                // Removed .mixWithOthers and .duckOthers as they can conflict
+            ]
+            
+            for (option, name) in optionsToTest {
+                do {
+                    let testOptions = successfulOptions.union(option)
+                    try audioSession.setCategory(.playback, mode: .default, options: testOptions)
+                    successfulOptions = testOptions
+                    print("✅ Audio option '\(name)' applied successfully")
+                } catch {
+                    print("⚠️ Audio option '\(name)' not supported: \(error.localizedDescription)")
+                }
+            }
+            
+            // Apply the successful options combination
+            if !successfulOptions.isEmpty {
+                try audioSession.setCategory(.playback, mode: .default, options: successfulOptions)
+                print("✅ Final audio session options applied: \(successfulOptions.rawValue)")
+            }
+            #else
+            print("ℹ️ Running on simulator, using basic audio configuration")
+            #endif
             
             await updateAudioRoute()
             currentAudioSession = .active
-            print("✅ Professional audio session configured successfully")
+            print("✅ Audio session configured successfully")
         } catch {
-            print("❌ Failed to setup professional audio session: \(error)")
+            print("❌ Failed to setup audio session: \(error)")
             currentAudioSession = .error(error.localizedDescription)
         }
     }
