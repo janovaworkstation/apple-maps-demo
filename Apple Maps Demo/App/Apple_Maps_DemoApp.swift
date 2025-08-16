@@ -10,9 +10,15 @@ import SwiftData
 
 @main
 struct Apple_Maps_DemoApp: App {
+    @StateObject private var audioManager = AudioManager.shared
+    @StateObject private var locationManager = LocationManager.shared
+    
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
-            Item.self,
+            Tour.self,
+            PointOfInterest.self,
+            AudioContent.self,
+            UserPreferences.self
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
@@ -25,7 +31,9 @@ struct Apple_Maps_DemoApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            TourMapView()
+                .environmentObject(audioManager)
+                .environmentObject(locationManager)
         }
         .modelContainer(sharedModelContainer)
     }
