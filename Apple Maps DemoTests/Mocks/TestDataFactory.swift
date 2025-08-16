@@ -9,6 +9,32 @@ import Foundation
 import CoreLocation
 @testable import Apple_Maps_Demo
 
+// CLVisit extension for testing
+extension CLVisit {
+    static func mockVisit(
+        coordinate: CLLocationCoordinate2D,
+        arrivalDate: Date = Date().addingTimeInterval(-3600),
+        departureDate: Date = Date()
+    ) -> CLVisit {
+        // Since CLVisit is a system class, we can't directly create it in tests
+        // This is a placeholder that would need a proper mock implementation
+        // For now, we'll return a mock that represents the concept
+        let visit = MockVisit()
+        visit.coordinate = coordinate
+        visit.arrivalDate = arrivalDate
+        visit.departureDate = departureDate
+        return visit as! CLVisit
+    }
+}
+
+// Mock visit class for testing
+class MockVisit: NSObject {
+    var coordinate: CLLocationCoordinate2D = CLLocationCoordinate2D()
+    var arrivalDate: Date = Date()
+    var departureDate: Date = Date()
+    var horizontalAccuracy: CLLocationAccuracy = 5.0
+}
+
 final class TestDataFactory {
     
     // MARK: - Tour Factory
@@ -40,8 +66,10 @@ final class TestDataFactory {
     }
     
     static func createTourWithPOIs(poiCount: Int = 3) -> Tour {
+        let tourId = UUID()
         let pois = (0..<poiCount).map { index in
             createPOI(
+                tourId: tourId,
                 name: "POI \(index + 1)",
                 coordinate: CLLocationCoordinate2D(
                     latitude: 37.7749 + Double(index) * 0.001,
@@ -51,6 +79,7 @@ final class TestDataFactory {
         }
         
         return createTour(
+            id: tourId,
             name: "Test Tour with \(poiCount) POIs",
             pointsOfInterest: pois
         )
@@ -60,25 +89,25 @@ final class TestDataFactory {
     
     static func createPOI(
         id: UUID = UUID(),
+        tourId: UUID = UUID(),
         name: String = "Test POI",
         coordinate: CLLocationCoordinate2D = CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194),
         radius: CLLocationDistance = 100,
         triggerType: TriggerType = .location,
         order: Int = 0
     ) -> PointOfInterest {
-        let audioContent = createAudioContent()
-        
         return PointOfInterest(
             id: id,
+            tourId: tourId,
             name: name,
-            coordinate: coordinate,
+            description: "Test POI description",
+            latitude: coordinate.latitude,
+            longitude: coordinate.longitude,
             radius: radius,
-            audioContent: audioContent,
             triggerType: triggerType,
             order: order,
-            description: "Test POI description",
             category: .general,
-            estimatedDuration: 120
+            importance: .medium
         )
     }
     
@@ -86,24 +115,26 @@ final class TestDataFactory {
     
     static func createAudioContent(
         id: UUID = UUID(),
-        localFileURL: URL? = nil,
-        transcript: String? = "Test audio transcript",
+        poiId: UUID = UUID(),
         duration: TimeInterval = 120,
+        language: String = "en",
         isLLMGenerated: Bool = false,
-        language: String = "en"
+        format: AudioFormat = .mp3,
+        quality: AudioQuality = .medium
     ) -> AudioContent {
-        return AudioContent(
+        let audioContent = AudioContent(
             id: id,
-            localFileURL: localFileURL,
-            transcript: transcript,
+            poiId: poiId,
             duration: duration,
-            isLLMGenerated: isLLMGenerated,
-            cachedAt: Date(),
             language: language,
-            quality: .medium,
-            fileSize: 1024000,
-            format: .mp3
+            isLLMGenerated: isLLMGenerated,
+            format: format,
+            quality: quality
         )
+        audioContent.transcript = "Test audio transcript"
+        audioContent.cachedAt = Date()
+        audioContent.fileSize = 1024000
+        return audioContent
     }
     
     // MARK: - UserPreferences Factory
@@ -113,15 +144,15 @@ final class TestDataFactory {
         autoplayEnabled: Bool = true,
         offlineMode: Bool = false,
         voiceSpeed: Float = 1.0,
-        voiceType: String = "default"
+        voiceType: VoiceType = .natural
     ) -> UserPreferences {
-        return UserPreferences(
-            preferredLanguage: preferredLanguage,
-            autoplayEnabled: autoplayEnabled,
-            offlineMode: offlineMode,
-            voiceSpeed: voiceSpeed,
-            voiceType: voiceType
-        )
+        let preferences = UserPreferences()
+        preferences.preferredLanguage = preferredLanguage
+        preferences.autoplayEnabled = autoplayEnabled
+        preferences.offlineMode = offlineMode
+        preferences.voiceSpeed = voiceSpeed
+        preferences.voiceType = voiceType
+        return preferences
     }
     
     // MARK: - Location Factory
@@ -176,16 +207,20 @@ final class TestDataFactory {
     }
     
     static var samplePOIs: [PointOfInterest] {
+        let tourId = UUID()
         return [
             createPOI(
+                tourId: tourId,
                 name: "Golden Gate Bridge",
                 coordinate: CLLocationCoordinate2D(latitude: 37.8199, longitude: -122.4783)
             ),
             createPOI(
+                tourId: tourId,
                 name: "Alcatraz Island",
                 coordinate: CLLocationCoordinate2D(latitude: 37.8267, longitude: -122.4230)
             ),
             createPOI(
+                tourId: tourId,
                 name: "Fisherman's Wharf",
                 coordinate: CLLocationCoordinate2D(latitude: 37.8080, longitude: -122.4177)
             )

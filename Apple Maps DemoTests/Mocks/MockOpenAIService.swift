@@ -7,6 +7,7 @@
 
 import Foundation
 import Combine
+import CoreLocation
 @testable import Apple_Maps_Demo
 
 final class MockOpenAIService {

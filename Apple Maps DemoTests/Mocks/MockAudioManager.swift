@@ -10,6 +10,14 @@ import Combine
 import CoreLocation
 @testable import Apple_Maps_Demo
 
+enum AudioManagerError: Error {
+    case fileNotFound
+    case invalidFormat
+    case playbackFailed
+    case networkError
+    case permissionDenied
+}
+
 @MainActor
 final class MockAudioManager: ObservableObject {
     
@@ -173,11 +181,36 @@ final class MockAudioManager: ObservableObject {
     }
 }
 
-// MARK: - Mock Audio Manager Error
+// MARK: - Supporting Types
 
-enum AudioManagerError: Error {
-    case playbackFailed
-    case fileNotFound
-    case invalidFormat
-    case networkError
+enum AudioRoute {
+    case builtin
+    case bluetooth
+    case headphones
+    case speaker
+}
+
+enum AudioConnectionStatus {
+    case builtin
+    case bluetooth
+    case wired
+}
+
+enum AudioSessionState: Equatable {
+    case inactive
+    case active
+    case interrupted
+}
+
+struct AudioPlaybackSession {
+    let id: UUID
+    let startTime: Date
+    let poi: PointOfInterest
+}
+
+struct AudioPlaybackRecord {
+    let id: UUID
+    let poi: PointOfInterest
+    let playedAt: Date
+    let duration: TimeInterval
 }
