@@ -419,13 +419,6 @@ class AudioContentRepository: AudioContentRepositoryProtocol {
 
 // MARK: - Supporting Types
 
-enum DownloadPriority: Int, CaseIterable {
-    case low = 0
-    case normal = 1
-    case high = 2
-    case urgent = 3
-}
-
 struct AudioStorageStatistics {
     let totalContent: Int
     let downloadedContent: Int

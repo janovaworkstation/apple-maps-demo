@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 import MapKit
 import Combine
@@ -20,7 +21,7 @@ class MapViewModel: ObservableObject {
     @Published var visitStatistics: VisitStatistics?
     
     private let locationManager = LocationManager.shared
-    private let audioManager = AudioManager.shared
+    private let audioManager = AudioManager()
     
     // Phase 4: New Services
     private let geofenceService = GeofenceService.shared
@@ -144,7 +145,7 @@ class MapViewModel: ObservableObject {
         visitTrackingService.setCurrentTour(nil)
         
         // Clear audio manager configuration
-        audioManager.setCurrentTour(nil)
+        audioManager.setCurrentTour(nil as Tour?)
         
         try await geofenceService.stopMonitoring()
         isGeofencingActive = false
