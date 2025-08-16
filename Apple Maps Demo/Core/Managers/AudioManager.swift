@@ -42,6 +42,9 @@ final class AudioManager: NSObject, ObservableObject {
     
     // MARK: - Private State
     private var currentTour: Tour?
+    
+    // MARK: - CarPlay Support
+    @Published var currentTourPublic: Tour?
     private var timeObserver: Any?
     private var audioQueue: [AudioQueueItem] = []
     private var currentQueueIndex = 0
@@ -755,6 +758,7 @@ final class AudioManager: NSObject, ObservableObject {
     
     func setCurrentTour(_ tour: Tour?) {
         currentTour = tour
+        currentTourPublic = tour
         if let tour = tour {
             switch tour.tourType {
             case .driving:
@@ -1359,6 +1363,61 @@ enum AudioSessionState: Equatable {
         case .active:           return "Active"
         case .interrupted:      return "Interrupted"
         case .error(let msg):   return "Error: \(msg)"
+        }
+    }
+}
+
+// MARK: - CarPlay Integration Extension
+
+extension AudioManager {
+    
+    /// Public accessor for current tour (used by CarPlay)
+    var currentTourForCarPlay: Tour? {
+        return currentTourPublic
+    }
+    
+    /// Start a tour (CarPlay-compatible async method)
+    func startTour(_ tour: Tour) async {
+        print("🚗 CarPlay: Starting tour: \(tour.name)")
+        setCurrentTour(tour)
+        
+        // Load first POI if available
+        if let firstPOI = tour.pointsOfInterest.first {
+            do {
+                try await playAudioForPOI(firstPOI)
+                print("🎵 CarPlay: Started playing first POI: \(firstPOI.name)")
+            } catch {
+                print("❌ CarPlay: Failed to start first POI: \(error)")
+            }
+        }
+    }
+    
+    /// Seek to specific time (CarPlay-compatible method)
+    func seekToTime(_ time: TimeInterval) async {
+        print("🚗 CarPlay: Seeking to \(time) seconds")
+        seek(to: time)
+    }
+    
+    /// Enhanced skip forward for CarPlay with feedback
+    func skipForward() async {
+        print("🚗 CarPlay: Skipping forward 30 seconds")
+        skipForward(30)
+    }
+    
+    /// Enhanced skip backward for CarPlay with feedback  
+    func skipBackward() async {
+        print("🚗 CarPlay: Skipping backward 30 seconds")
+        skipBackward(30)
+    }
+    
+    /// Toggle playback for CarPlay
+    func togglePlayback() async {
+        if isPlaying {
+            pause()
+            print("⏸️ CarPlay: Paused playback")
+        } else {
+            resume()
+            print("▶️ CarPlay: Resumed playback")
         }
     }
 }
