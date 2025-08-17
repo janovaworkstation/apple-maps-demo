@@ -3,6 +3,7 @@ import MapKit
 
 struct TourMapView: View {
     @StateObject private var viewModel = MapViewModel()
+    @EnvironmentObject var appStateManager: AppStateManager
     @State private var mapSelection: String?
     @State private var showingPOIDetail = false
     @State private var selectedPOI: PointOfInterest?
@@ -56,6 +57,19 @@ struct TourMapView: View {
         }
         .onAppear {
             viewModel.startLocationUpdates()
+            
+            // Load the active tour if one is selected
+            if let activeTour = appStateManager.activeTour {
+                viewModel.loadTour(activeTour)
+            }
+        }
+        .onChange(of: appStateManager.activeTour) { _, newTour in
+            // Update map when active tour changes
+            if let tour = newTour {
+                viewModel.loadTour(tour)
+            } else {
+                viewModel.clearTour()
+            }
         }
         .onDisappear {
             viewModel.stopLocationUpdates()

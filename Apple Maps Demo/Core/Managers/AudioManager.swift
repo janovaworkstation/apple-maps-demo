@@ -140,6 +140,7 @@ final class AudioManager: NSObject, ObservableObject {
             await setupRemoteCommandCenter()
             await setupAudioSessionObservers()
             await setupPredictiveLoading()
+            setupTourNotifications()
             // Setup audio session after other components are ready
             await setupProfessionalAudioSession()
         }
@@ -1600,5 +1601,80 @@ extension AudioManager {
             resume()
             print("▶️ CarPlay: Resumed playback")
         }
+    }
+    
+    // MARK: - Tour Management
+    
+    private func setupTourNotifications() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleTourStarted(_:)),
+            name: .tourStarted,
+            object: nil
+        )
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleTourStopped(_:)),
+            name: .tourStopped,
+            object: nil
+        )
+    }
+    
+    @objc private func handleTourStarted(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let tour = userInfo["tour"] as? Tour else { return }
+        
+        Task { @MainActor in
+            await prepareTourAudio(tour)
+        }
+    }
+    
+    @objc private func handleTourStopped(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let tour = userInfo["tour"] as? Tour else { return }
+        
+        Task { @MainActor in
+            await cleanupTourAudio(tour)
+        }
+    }
+    
+    private func prepareTourAudio(_ tour: Tour) async {
+        print("🎵 Preparing audio for tour: \(tour.name)")
+        
+        // Ensure audio session is active
+        await setupProfessionalAudioSession()
+        
+        // Preload audio content for POIs if available
+        for poi in tour.pointsOfInterest {
+            await preloadAudioContent(for: poi)
+        }
+        
+        print("🎵 Audio preparation complete for tour: \(tour.name)")
+    }
+    
+    private func cleanupTourAudio(_ tour: Tour) async {
+        print("🎵 Cleaning up audio for tour: \(tour.name)")
+        
+        // Stop any current playback
+        stop()
+        
+        // Clear any cached audio for this tour's POIs
+        for poi in tour.pointsOfInterest {
+            await clearAudioCache(for: poi)
+        }
+        
+        print("🎵 Audio cleanup complete for tour: \(tour.name)")
+    }
+    
+    private func preloadAudioContent(for poi: PointOfInterest) async {
+        // Implementation would preload audio content for faster playback
+        // when user enters the POI geofence
+        print("🎵 Preloading audio for POI: \(poi.name)")
+    }
+    
+    private func clearAudioCache(for poi: PointOfInterest) async {
+        // Implementation would clear cached audio to free memory
+        print("🎵 Clearing audio cache for POI: \(poi.name)")
     }
 }

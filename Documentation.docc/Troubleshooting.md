@@ -709,6 +709,98 @@ func repairCache() {
 }
 ```
 
+## Simulator-Specific Issues
+
+### eligibility.plist Warning
+
+#### Symptoms
+- Console warning: `load_eligibility_plist: Failed to open ...eligibility.plist: No such file or directory`
+- Only appears in iOS Simulator, not on physical devices
+- Does not affect app functionality
+
+#### Cause
+This is a known iOS Simulator issue with Apple's location eligibility system introduced in iOS 17.4. The eligibility system determines region-specific features (EU Digital Markets Act compliance), but the simulator doesn't properly create the required system files.
+
+#### Solutions
+**For Development**: This warning can be safely ignored as it:
+- Only affects iOS Simulator
+- Does not impact app functionality
+- Does not appear on physical devices
+- Is related to Apple's internal location compliance system
+
+**For Testing**: If the warning is distracting during development:
+```swift
+// Suppress simulator-specific warnings in debug builds
+#if targetEnvironment(simulator) && DEBUG
+// Known simulator issue - eligibility.plist warnings can be ignored
+#endif
+```
+
+**Alternative**: Reset the simulator if warnings become excessive:
+1. Device → Erase All Content and Settings
+2. Clean build folder (⌘⇧K)
+3. Rebuild and run
+
+### default.csv Resource Warning
+
+#### Symptoms
+- Console warning: `Failed to locate resource named "default.csv"`
+- Occurs during app initialization
+- Does not prevent normal app operation
+
+#### Cause
+This warning typically originates from:
+- CarPlay framework internal initialization
+- System frameworks attempting to load default configuration
+- Third-party dependencies with missing configuration files
+
+#### Solutions
+**Investigation Steps**:
+1. Check if warning correlates with specific features (CarPlay, location, audio)
+2. Monitor if warning appears on physical devices
+3. Verify all app bundle resources are properly included
+
+**Resolution**: In most cases, this warning can be safely ignored unless it correlates with actual missing functionality.
+
+### Core Analytics Event Failures
+
+#### Symptoms
+- Console warning: `Failed to send CA Event for app launch measurements`
+- Includes event types for FirstFramePresentationMetric and ExtendedLaunchMetrics
+- Only appears in iOS Simulator during app launch
+
+#### Cause
+Core Analytics (CA) launch measurement system cannot properly communicate with simulator infrastructure. This affects Apple's internal app launch performance metrics collection.
+
+#### Solutions
+**For Development**: These warnings are harmless and can be ignored:
+- Only affect simulator analytics collection
+- Do not impact app functionality or performance
+- Real device deployment will not show these warnings
+
+### Audio Factory Registration Warnings
+
+#### Symptoms
+- Console warning: `AddInstanceForFactory: No factory registered for id <CFUUID> F8BB1C28-BAE8-11D6-9C31-00039315CD46`
+- Appears during audio system initialization
+- Only occurs in iOS Simulator
+
+#### Cause
+Audio framework factory registration issues in simulator environment. The CFUUID corresponds to audio component factory registration that fails in simulator.
+
+#### Solutions
+**For Development**: This warning is harmless:
+- Audio functionality works normally despite the warning
+- Physical devices will not show this warning
+- Simulator audio system has known limitations compared to real hardware
+
+**Code Recognition**: The app already handles this correctly:
+```swift
+#if targetEnvironment(simulator)
+print("ℹ️ Running on simulator, using basic audio configuration")
+#endif
+```
+
 ## Emergency Recovery
 
 ### Complete App Reset

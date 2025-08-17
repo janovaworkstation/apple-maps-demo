@@ -113,14 +113,8 @@ final class TourDetailViewModel: ObservableObject {
     }
     
     func startTour(_ tour: Tour) {
-        // Implementation would start the tour navigation
-        print("🎯 Starting tour: \(tour.name)")
-        
-        // This would typically:
-        // 1. Set the current tour in the app state
-        // 2. Navigate to the map view
-        // 3. Start location tracking
-        // 4. Begin geofencing setup
+        // Use the shared app state manager to start the tour
+        AppStateManager.shared.startTour(tour)
     }
     
     func shareTour(_ tour: Tour) {

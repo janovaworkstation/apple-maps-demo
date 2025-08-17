@@ -4,10 +4,10 @@ struct MainTabView: View {
     @StateObject private var hybridContentManager = HybridContentManager.shared
     @EnvironmentObject var audioManager: AudioManager
     @EnvironmentObject var locationManager: LocationManager
-    @State private var selectedTab = 0
+    @EnvironmentObject var appStateManager: AppStateManager
     
     var body: some View {
-        TabView(selection: $selectedTab) {
+        TabView(selection: $appStateManager.selectedTab) {
             // Map Tab
             TourMapView()
                 .tabItem {
@@ -197,6 +197,8 @@ class AppStateManager: ObservableObject {
     @Published var isShowingTourDetail = false
     @Published var selectedTour: Tour?
     @Published var isShowingAudioPlayer = false
+    @Published var activeTour: Tour?
+    @Published var isTourActive = false
     
     static let shared = AppStateManager()
     
@@ -219,7 +221,37 @@ class AppStateManager: ObservableObject {
     func navigateToTours() {
         selectedTab = 1
     }
+    
+    func startTour(_ tour: Tour) {
+        activeTour = tour
+        isTourActive = true
+        navigateToMap()
+        print("🎯 Tour started: \(tour.name)")
+        
+        // Notify other managers that a tour has started
+        NotificationCenter.default.post(
+            name: .tourStarted,
+            object: nil,
+            userInfo: ["tour": tour]
+        )
+    }
+    
+    func stopTour() {
+        guard let tour = activeTour else { return }
+        
+        activeTour = nil
+        isTourActive = false
+        print("🛑 Tour stopped: \(tour.name)")
+        
+        // Notify other managers that the tour has stopped
+        NotificationCenter.default.post(
+            name: .tourStopped,
+            object: nil,
+            userInfo: ["tour": tour]
+        )
+    }
 }
+
 
 #Preview {
     MainTabView()

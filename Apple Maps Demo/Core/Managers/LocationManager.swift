@@ -93,10 +93,12 @@ class LocationManager: NSObject, ObservableObject {
         setupBatteryMonitoring()
         setupMovementDetection()
         configureLocationManagerForOptimalPerformance()
+        setupTourNotifications()
     }
     
     deinit {
         batteryMonitor?.stop()
+        NotificationCenter.default.removeObserver(self)
         print("🧹 LocationManager cleanup completed")
     }
     
@@ -118,7 +120,9 @@ class LocationManager: NSObject, ObservableObject {
             return
         }
         
-        isUpdatingLocation = true
+        Task { @MainActor in
+            isUpdatingLocation = true
+        }
         applyOptimalLocationSettings()
         locationManager.startUpdatingLocation()
         locationManager.startUpdatingHeading()
@@ -126,7 +130,9 @@ class LocationManager: NSObject, ObservableObject {
     }
     
     func stopUpdatingLocation() {
-        isUpdatingLocation = false
+        Task { @MainActor in
+            isUpdatingLocation = false
+        }
         locationManager.stopUpdatingLocation()
         locationManager.stopUpdatingHeading()
         print("📍 Location updates stopped")
@@ -135,7 +141,9 @@ class LocationManager: NSObject, ObservableObject {
     // MARK: - Performance Optimization Methods
     
     func configureTourType(_ tourType: TourType) {
-        self.currentTourType = tourType
+        Task { @MainActor in
+            self.currentTourType = tourType
+        }
         adaptLocationSettingsForTourType(tourType)
         print("📍 Location configured for \(tourType) tour")
     }
@@ -152,7 +160,9 @@ class LocationManager: NSObject, ObservableObject {
         }
         
         if newOptimizationLevel != batteryOptimizationLevel {
-            batteryOptimizationLevel = newOptimizationLevel
+            Task { @MainActor in
+                batteryOptimizationLevel = newOptimizationLevel
+            }
             applyOptimalLocationSettings()
             print("📍 Battery optimization level: \(newOptimizationLevel)")
         }
@@ -253,22 +263,24 @@ class LocationManager: NSObject, ObservableObject {
     }
     
     private func adaptLocationSettingsForTourType(_ tourType: TourType) {
-        switch tourType {
-        case .driving:
-            currentAccuracyLevel = .high
-            currentUpdateInterval = 0.5  // More frequent updates for driving
-        case .walking:
-            currentAccuracyLevel = .standard
-            currentUpdateInterval = 2.0  // Less frequent for walking
-        case .mixed:
-            currentAccuracyLevel = .standard
-            currentUpdateInterval = 1.0  // Balanced approach
-        @unknown default:
-            currentAccuracyLevel = .standard
-            currentUpdateInterval = 1.0
+        Task { @MainActor in
+            switch tourType {
+            case .driving:
+                currentAccuracyLevel = .high
+                currentUpdateInterval = 0.5  // More frequent updates for driving
+            case .walking:
+                currentAccuracyLevel = .standard
+                currentUpdateInterval = 2.0  // Less frequent for walking
+            case .mixed:
+                currentAccuracyLevel = .standard
+                currentUpdateInterval = 1.0  // Balanced approach
+            @unknown default:
+                currentAccuracyLevel = .standard
+                currentUpdateInterval = 1.0
+            }
+            
+            applyOptimalLocationSettings()
         }
-        
-        applyOptimalLocationSettings()
     }
     
     private func applyOptimalLocationSettings() {
@@ -370,53 +382,125 @@ class LocationManager: NSObject, ObservableObject {
         
         return baseFilter
     }
+    
+    // MARK: - Tour Management
+    
+    private func setupTourNotifications() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleTourStarted(_:)),
+            name: .tourStarted,
+            object: nil
+        )
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleTourStopped(_:)),
+            name: .tourStopped,
+            object: nil
+        )
+    }
+    
+    @objc private func handleTourStarted(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let tour = userInfo["tour"] as? Tour else { return }
+        
+        Task { @MainActor in
+            await startTourLocationTracking(tour)
+        }
+    }
+    
+    @objc private func handleTourStopped(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let tour = userInfo["tour"] as? Tour else { return }
+        
+        Task { @MainActor in
+            await stopTourLocationTracking(tour)
+        }
+    }
+    
+    private func startTourLocationTracking(_ tour: Tour) async {
+        print("📍 Starting location tracking for tour: \(tour.name)")
+        
+        // Configure location settings for tour type
+        configureTourType(tour.tourType)
+        
+        // Start location updates if not already running
+        startUpdatingLocation()
+        
+        // Set up geofencing for all POIs in the tour
+        for poi in tour.pointsOfInterest {
+            startMonitoring(poi: poi)
+        }
+        
+        print("📍 Location tracking and geofencing setup complete for \(tour.pointsOfInterest.count) POIs")
+    }
+    
+    private func stopTourLocationTracking(_ tour: Tour) async {
+        print("📍 Stopping location tracking for tour: \(tour.name)")
+        
+        // Stop monitoring all POIs for this tour
+        for poi in tour.pointsOfInterest {
+            stopMonitoring(poi: poi)
+        }
+        
+        // Optionally stop location updates if no other tours are active
+        // Note: We could keep location running for other potential uses
+        stopUpdatingLocation()
+        
+        print("📍 Location tracking stopped for tour: \(tour.name)")
+    }
 }
 
 // MARK: - CLLocationManagerDelegate
 
 extension LocationManager: CLLocationManagerDelegate {
-    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
-        authorizationStatus = manager.authorizationStatus
-        
-        if let continuation = continuationForAuthorization {
-            continuation.resume(returning: authorizationStatus)
-            continuationForAuthorization = nil
-        }
-        
-        switch authorizationStatus {
-        case .authorizedAlways, .authorizedWhenInUse:
-            startUpdatingLocation()
-        case .denied, .restricted:
-            locationError = LocationError.unauthorized
-            stopUpdatingLocation()
-        default:
-            break
+    nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        Task { @MainActor in
+            authorizationStatus = manager.authorizationStatus
+            
+            if let continuation = continuationForAuthorization {
+                continuation.resume(returning: authorizationStatus)
+                continuationForAuthorization = nil
+            }
+            
+            switch authorizationStatus {
+            case .authorizedAlways, .authorizedWhenInUse:
+                startUpdatingLocation()
+            case .denied, .restricted:
+                locationError = LocationError.unauthorized
+                stopUpdatingLocation()
+            default:
+                break
+            }
         }
     }
     
-    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+    nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let location = locations.last else { return }
         
         // Filter out invalid or old locations
         let howRecent = location.timestamp.timeIntervalSinceNow
         guard abs(howRecent) < 10.0 else { return }
         
-        // Dynamic accuracy filtering based on current settings
-        let maxAccuracy = calculateOptimalAccuracy()
-        guard location.horizontalAccuracy > 0 && location.horizontalAccuracy <= maxAccuracy else { return }
-        
-        // Update movement detection
-        movementDetector?.addLocation(location)
-        
-        // Track location update performance
-        locationUpdateCount += 1
-        lastLocationUpdate = Date()
-        
-        currentLocation = location
-        locationUpdateHandler?(location)
-        
-        // Optimize settings based on movement patterns
-        optimizeBasedOnMovementPattern(location)
+        Task { @MainActor in
+            // Dynamic accuracy filtering based on current settings
+            let maxAccuracy = calculateOptimalAccuracy()
+            guard location.horizontalAccuracy > 0 && location.horizontalAccuracy <= maxAccuracy else { return }
+            
+            // Update movement detection
+            movementDetector?.addLocation(location)
+            
+            // Track location update performance
+            locationUpdateCount += 1
+            lastLocationUpdate = Date()
+            
+            currentLocation = location
+            locationUpdateHandler?(location)
+            
+            // Optimize settings based on movement patterns
+            optimizeBasedOnMovementPattern(location)
+        }
     }
     
     private func optimizeBasedOnMovementPattern(_ location: CLLocation) {
@@ -442,11 +526,13 @@ extension LocationManager: CLLocationManagerDelegate {
         }
     }
     
-    func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {
-        heading = newHeading
+    nonisolated func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {
+        Task { @MainActor in
+            heading = newHeading
+        }
     }
     
-    func locationManager(_ manager: CLLocationManager, didEnterRegion region: CLRegion) {
+    nonisolated func locationManager(_ manager: CLLocationManager, didEnterRegion region: CLRegion) {
         guard let circularRegion = region as? CLCircularRegion else { return }
         
         NotificationCenter.default.post(
@@ -456,7 +542,7 @@ extension LocationManager: CLLocationManagerDelegate {
         )
     }
     
-    func locationManager(_ manager: CLLocationManager, didExitRegion region: CLRegion) {
+    nonisolated func locationManager(_ manager: CLLocationManager, didExitRegion region: CLRegion) {
         guard let circularRegion = region as? CLCircularRegion else { return }
         
         NotificationCenter.default.post(
@@ -466,8 +552,28 @@ extension LocationManager: CLLocationManagerDelegate {
         )
     }
     
-    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        locationError = error
+    nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        Task { @MainActor in
+            locationError = error
+        }
+        
+        // Handle common simulator errors more gracefully
+        if let clError = error as? CLError {
+            switch clError.code {
+            case .locationUnknown:
+                #if targetEnvironment(simulator)
+                print("📍 Location unknown in simulator - this is expected behavior")
+                #else
+                print("📍 Location unknown on device - GPS may be unavailable")
+                #endif
+            case .denied:
+                print("📍 Location access denied")
+            case .network:
+                print("📍 Network error when determining location")
+            default:
+                print("📍 Location error: \(error.localizedDescription)")
+            }
+        }
     }
 }
 
@@ -604,4 +710,6 @@ class MovementDetector {
 extension Notification.Name {
     static let didEnterRegion = Notification.Name("didEnterRegion")
     static let didExitRegion = Notification.Name("didExitRegion")
+    static let tourStarted = Notification.Name("tourStarted")
+    static let tourStopped = Notification.Name("tourStopped")
 }

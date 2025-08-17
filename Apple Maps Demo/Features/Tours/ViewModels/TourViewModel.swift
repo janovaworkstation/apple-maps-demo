@@ -12,6 +12,7 @@ final class TourViewModel: ObservableObject {
     @Published var searchQuery: String = ""
     
     // Filter State
+    @Published var selectedCategory: TourCategory?
     @Published var selectedTourTypes: Set<TourType> = []
     @Published var selectedDurationFilter: DurationFilter?
     @Published var selectedDownloadFilter: DownloadFilter? = .all // Default to .all
@@ -25,6 +26,7 @@ final class TourViewModel: ObservableObject {
     // MARK: - Computed Properties
     
     var hasActiveFilters: Bool {
+        selectedCategory != nil ||
         !selectedTourTypes.isEmpty ||
         selectedDurationFilter != nil ||
         (selectedDownloadFilter != nil && selectedDownloadFilter != .all) ||
@@ -43,7 +45,7 @@ final class TourViewModel: ObservableObject {
         }
         
         // Download filter
-        if let downloadFilter = selectedDownloadFilter {
+        if let downloadFilter = selectedDownloadFilter, downloadFilter != .all {
             tags.append(downloadFilter.displayName)
         }
         
@@ -73,12 +75,15 @@ final class TourViewModel: ObservableObject {
     // MARK: - Setup
     
     private func setupBindings() {
-        // Auto-filter when search query or filters change
-        Publishers.CombineLatest4(
-            $searchQuery,
-            $selectedTourTypes,
-            $selectedDurationFilter,
-            $selectedDownloadFilter
+        // Auto-filter when search query or filters change (debounced for search performance)
+        Publishers.CombineLatest(
+            Publishers.CombineLatest4(
+                $searchQuery,
+                $selectedTourTypes,
+                $selectedDurationFilter,
+                $selectedDownloadFilter
+            ),
+            $selectedCategory
         )
         .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
         .sink { [weak self] _ in
@@ -103,21 +108,14 @@ final class TourViewModel: ObservableObject {
         errorMessage = nil
         
         Task { // inherits @MainActor from this context
-            do {
-                try await Task.sleep(nanoseconds: 1_000_000_000) // 1 second delay
-                
-                // Load tours (mock data for now)
-                let loadedTours = await generateMockTours()
-                
-                tours = loadedTours
-                loadDownloadStatuses()
-                applyFilters()
-                
-                isLoading = false
-                
-            } catch {
-                await handleError(error)
-            }
+            // Load tours (mock data for now)
+            let loadedTours = await generateMockTours()
+            
+            tours = loadedTours
+            loadDownloadStatuses()
+            applyFilters()
+            
+            isLoading = false
         }
     }
     
@@ -144,6 +142,12 @@ final class TourViewModel: ObservableObject {
     }
     
     // MARK: - Filter Management
+    
+    func setSelectedCategory(_ category: TourCategory?) {
+        selectedCategory = category
+        // Apply filters immediately for category changes (bypass debounce for better UX)
+        applyFilters()
+    }
     
     func toggleTourType(_ type: TourType) {
         if selectedTourTypes.contains(type) {
@@ -177,6 +181,7 @@ final class TourViewModel: ObservableObject {
     }
     
     func clearAllFilters() {
+        selectedCategory = nil
         selectedTourTypes.removeAll()
         selectedDurationFilter = nil
         selectedDownloadFilter = nil
@@ -204,7 +209,11 @@ final class TourViewModel: ObservableObject {
                     
                     // Explicitly hop to MainActor for state updates
                     await MainActor.run {
-                        self.downloadProgress[tour.id] = Double(i) / 100.0
+                        let progress = Double(i) / 100.0
+                        // Ensure progress is valid before storing
+                        if progress.isFinite && !progress.isNaN {
+                            self.downloadProgress[tour.id] = progress
+                        }
                     }
                     try await Task.sleep(nanoseconds: 50_000_000) // 50ms
                 }
@@ -239,13 +248,26 @@ final class TourViewModel: ObservableObject {
         if downloadedTours.contains(tour.id) {
             return 1.0
         }
-        return downloadProgress[tour.id]
+        
+        if let progress = downloadProgress[tour.id] {
+            // Return only valid progress values
+            return progress.isFinite && !progress.isNaN ? progress : nil
+        }
+        
+        return nil
     }
     
     // MARK: - Private Methods
     
     private func applyFilters() {
         var filtered = tours
+        
+        // Apply category filter
+        if let category = selectedCategory {
+            filtered = filtered.filter { tour in
+                tour.category == category
+            }
+        }
         
         // Apply search query
         let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)

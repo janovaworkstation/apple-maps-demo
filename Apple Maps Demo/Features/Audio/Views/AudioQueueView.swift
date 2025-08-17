@@ -345,16 +345,22 @@ struct QueueItemRow: View {
 struct CircularProgressView: View {
     let progress: Double
     
+    // Safely clamp progress value to prevent CoreGraphics NaN errors
+    private var safeProgress: Double {
+        let clamped = max(0.0, min(1.0, progress))
+        return clamped.isNaN || clamped.isInfinite ? 0.0 : clamped
+    }
+    
     var body: some View {
         ZStack {
             Circle()
                 .stroke(Color.gray.opacity(0.3), lineWidth: 3)
             
             Circle()
-                .trim(from: 0, to: progress)
+                .trim(from: 0, to: safeProgress)
                 .stroke(Color.blue, lineWidth: 3)
                 .rotationEffect(.degrees(-90))
-                .animation(.easeInOut(duration: 0.2), value: progress)
+                .animation(.easeInOut(duration: 0.2), value: safeProgress)
         }
     }
 }

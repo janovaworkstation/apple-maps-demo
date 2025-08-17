@@ -43,8 +43,10 @@ class MapViewModel: ObservableObject {
                 self?.userLocation = location
                 self?.updateCameraIfNeeded(for: location)
                 
-                // Load mock POIs near user location if we haven't already
-                if self?.pointsOfInterest.isEmpty == true, let userLocation = location {
+                // Load mock POIs near user location if we haven't already and no tour is active
+                if self?.pointsOfInterest.isEmpty == true, 
+                   self?.currentTour == nil, 
+                   let userLocation = location {
                     self?.loadMockDataNear(location: userLocation)
                 }
                 
@@ -305,6 +307,57 @@ class MapViewModel: ObservableObject {
         withAnimation {
             cameraPosition = .region(region)
         }
+    }
+    
+    // MARK: - Tour Management
+    
+    func loadTour(_ tour: Tour) {
+        print("🗺️ Loading tour: \(tour.name)")
+        
+        // Set the current tour
+        currentTour = tour
+        
+        // Load tour POIs
+        pointsOfInterest = tour.pointsOfInterest
+        
+        // Create route polyline if we have multiple POIs
+        if tour.pointsOfInterest.count > 1 {
+            let coordinates = tour.pointsOfInterest.map { $0.coordinate }
+            tourRoute = MKPolyline(coordinates: coordinates, count: coordinates.count)
+        } else {
+            tourRoute = nil
+        }
+        
+        // Center map on tour if POIs exist
+        if let firstPOI = tour.pointsOfInterest.first {
+            centerOnPOI(firstPOI)
+        }
+        
+        // Start tour geofencing if location services are available
+        if userLocation != nil {
+            Task {
+                try? await startTourGeofencing(tour: tour)
+            }
+        }
+        
+        print("✅ Tour loaded with \(tour.pointsOfInterest.count) POIs")
+    }
+    
+    func clearTour() {
+        print("🗺️ Clearing current tour")
+        
+        // Stop geofencing for current tour
+        Task {
+            try? await stopTourGeofencing()
+        }
+        
+        // Clear tour data
+        currentTour = nil
+        pointsOfInterest.removeAll()
+        tourRoute = nil
+        visitedPOIs.removeAll()
+        
+        print("✅ Tour cleared")
     }
     
     // MARK: - Mock Data

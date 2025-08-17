@@ -3,19 +3,27 @@ import SwiftUI
 struct TourListView: View {
     @StateObject private var viewModel = TourViewModel()
     @State private var searchText = ""
-    @State private var selectedCategory: TourCategory? = nil
     @State private var showingFilterSheet = false
-    @State private var selectedTour: Tour?
+    @State private var isSearching = false
     
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
-                // Search and Filter Bar
-                searchAndFilterSection
+                // Filter Button
+                filterSection
+                
+                // Active Filters (if any)
+                if viewModel.hasActiveFilters || !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    activeFiltersSection
+                }
+                
+                // Results Count and Sort
+                resultsSection
                 
                 // Tour Categories
-                if selectedCategory == nil {
+                if viewModel.selectedCategory == nil {
                     categoriesSection
+                        .background(Color(.systemGroupedBackground))
                 }
                 
                 // Tours List
@@ -27,102 +35,131 @@ struct TourListView: View {
             }
             .navigationTitle("Tours")
             .navigationBarTitleDisplayMode(.large)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    HStack {
-                        Button(action: { showingFilterSheet = true }) {
-                            Image(systemName: "line.3.horizontal.decrease.circle")
-                        }
-                        
-                        Button(action: { viewModel.refreshTours() }) {
-                            Image(systemName: "arrow.clockwise")
-                        }
-                    }
-                }
+            .searchable(text: $searchText, isPresented: $isSearching, prompt: "Search tours...")
+            .onChange(of: searchText) { _, newValue in
+                viewModel.updateSearchQuery(newValue)
             }
             .onAppear {
                 viewModel.loadTours()
-            }
-            .searchable(text: $searchText, prompt: "Search tours...")
-            .onChange(of: searchText) { _, newValue in
-                viewModel.updateSearchQuery(newValue)
             }
         }
         .sheet(isPresented: $showingFilterSheet) {
             TourFilterSheet(viewModel: viewModel)
         }
-        .sheet(item: $selectedTour) { tour in
-            TourDetailView(tour: tour)
-        }
     }
     
-    // MARK: - Search and Filter Section
+    // MARK: - Filter Section
     
-    private var searchAndFilterSection: some View {
-        VStack(spacing: 12) {
-            // Active Filters
-            if viewModel.hasActiveFilters || selectedCategory != nil {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        if let category = selectedCategory {
-                            FilterChip(
-                                title: category.rawValue,
-                                systemImage: category.iconName,
-                                isActive: true,
-                                onRemove: { selectedCategory = nil }
-                            )
-                        }
-                        
-                        ForEach(viewModel.activeFilterTags, id: \.self) { tag in
-                            FilterChip(
-                                title: tag,
-                                isActive: true,
-                                onRemove: { viewModel.removeFilter(tag) }
-                            )
-                        }
-                        
-                        if viewModel.hasActiveFilters {
-                            Button("Clear All") {
-                                viewModel.clearAllFilters()
-                                selectedCategory = nil
-                            }
-                            .font(.caption)
-                            .foregroundColor(.blue)
-                            .padding(.leading, 8)
-                        }
-                    }
-                    .padding(.horizontal)
-                }
-            }
+    private var filterSection: some View {
+        HStack {
+            Spacer()
             
-            // Results Count
-            HStack {
-                Text("\(viewModel.filteredTours.count) tours found")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+            // Filter Button
+            Button(action: { showingFilterSheet = true }) {
+                HStack(spacing: 6) {
+                    Image(systemName: "line.3.horizontal.decrease.circle")
+                        .font(.system(size: 18))
+                    Text("Filter")
+                        .font(.subheadline)
+                }
+                .foregroundColor(.blue)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Color.blue.opacity(0.1))
+                .cornerRadius(8)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Color(.systemGroupedBackground))
+    }
+    
+    // MARK: - Active Filters Section
+    
+    private var activeFiltersSection: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                // Search filter chip
+                if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    FilterChip(
+                        title: "Search: \"\(searchText)\"",
+                        systemImage: "magnifyingglass",
+                        isActive: true,
+                        onRemove: { 
+                            searchText = ""
+                            viewModel.updateSearchQuery("")
+                        }
+                    )
+                }
                 
-                Spacer()
+                if let category = viewModel.selectedCategory {
+                    FilterChip(
+                        title: category.rawValue,
+                        systemImage: category.iconName,
+                        isActive: true,
+                        onRemove: { viewModel.setSelectedCategory(nil) }
+                    )
+                }
                 
-                // Sort Options
-                Menu {
-                    Button("Name A-Z") { viewModel.setSortOption(.nameAscending) }
-                    Button("Name Z-A") { viewModel.setSortOption(.nameDescending) }
-                    Button("Duration (Short)") { viewModel.setSortOption(.durationAscending) }
-                    Button("Duration (Long)") { viewModel.setSortOption(.durationDescending) }
-                    Button("Recently Added") { viewModel.setSortOption(.recentlyAdded) }
-                    Button("Popular") { viewModel.setSortOption(.popularity) }
-                } label: {
-                    HStack(spacing: 4) {
-                        Text("Sort")
-                            .font(.caption)
-                        Image(systemName: "chevron.down")
-                            .font(.caption2)
+                ForEach(viewModel.activeFilterTags, id: \.self) { tag in
+                    FilterChip(
+                        title: tag,
+                        isActive: true,
+                        onRemove: { viewModel.removeFilter(tag) }
+                    )
+                }
+                
+                if viewModel.hasActiveFilters || !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Button("Clear All") {
+                        searchText = ""
+                        viewModel.clearAllFilters()
+                        isSearching = false
                     }
+                    .font(.caption)
                     .foregroundColor(.blue)
+                    .padding(.leading, 8)
                 }
             }
-            .padding(.horizontal)
+            .padding(.horizontal, 16)
         }
+        .frame(maxWidth: .infinity)
+        .frame(minHeight: 40)
+        .padding(.vertical, 8)
+        .background(Color(.systemGroupedBackground))
+    }
+    
+    // MARK: - Results Section
+    
+    private var resultsSection: some View {
+        HStack {
+            Text("\(max(0, viewModel.filteredTours.count)) tours found")
+                .font(.caption)
+                .foregroundColor(.secondary)
+            
+            Spacer()
+            
+            // Sort Options
+            Menu {
+                Button("Name A-Z") { viewModel.setSortOption(.nameAscending) }
+                Button("Name Z-A") { viewModel.setSortOption(.nameDescending) }
+                Button("Duration (Short)") { viewModel.setSortOption(.durationAscending) }
+                Button("Duration (Long)") { viewModel.setSortOption(.durationDescending) }
+                Button("Recently Added") { viewModel.setSortOption(.recentlyAdded) }
+                Button("Popular") { viewModel.setSortOption(.popularity) }
+            } label: {
+                HStack(spacing: 4) {
+                    Text("Sort")
+                        .font(.caption)
+                    Image(systemName: "chevron.down")
+                        .font(.caption2)
+                        .frame(width: 8, height: 6)
+                }
+                .foregroundColor(.blue)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(minHeight: 28)
+        .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .background(Color(.systemGroupedBackground))
     }
@@ -130,19 +167,25 @@ struct TourListView: View {
     // MARK: - Categories Section
     
     private var categoriesSection: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            LazyHStack(spacing: 16) {
-                ForEach(TourCategory.allCases, id: \.self) { category in
-                    CategoryCard(
-                        category: category,
-                        tourCount: viewModel.getTourCount(for: category),
-                        onTap: { selectedCategory = category }
-                    )
-                }
+        let columns = [
+            GridItem(.flexible(), spacing: 8),
+            GridItem(.flexible(), spacing: 8),
+            GridItem(.flexible(), spacing: 8)
+        ]
+        
+        return LazyVGrid(columns: columns, spacing: 12) {
+            ForEach(TourCategory.allCases, id: \.self) { category in
+                CategoryCard(
+                    category: category,
+                    tourCount: viewModel.getTourCount(for: category),
+                    onTap: { viewModel.setSelectedCategory(category) }
+                )
             }
-            .padding(.horizontal)
         }
-        .padding(.vertical)
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 20)
+        .frame(height: 220)
     }
     
     // MARK: - Tours List Section
@@ -150,16 +193,18 @@ struct TourListView: View {
     private var toursListSection: some View {
         List {
             ForEach(viewModel.filteredTours) { tour in
-                TourRowView(
-                    tour: tour,
-                    downloadProgress: viewModel.getDownloadProgress(for: tour),
-                    onTap: { handleTourTap(tour) },
-                    onDownload: { handleTourDownload(tour) },
-                    onCancelDownload: { handleCancelDownload(tour) }
-                )
+                NavigationLink(destination: TourDetailView(tour: tour)) {
+                    TourRowView(
+                        tour: tour,
+                        downloadProgress: viewModel.getDownloadProgress(for: tour),
+                        onTap: { },
+                        onDownload: { handleTourDownload(tour) },
+                        onCancelDownload: { handleCancelDownload(tour) }
+                    )
+                }
                 .listRowBackground(Color(.systemBackground))
                 .listRowSeparator(.hidden)
-                .padding(.vertical, 4)
+                .padding(.vertical, 2)
             }
             
             if viewModel.isLoading {
@@ -178,6 +223,13 @@ struct TourListView: View {
         .refreshable {
             await viewModel.refreshToursAsync()
         }
+        .overlay(
+            Rectangle()
+                .fill(Color(.separator))
+                .frame(height: 0.5)
+                .opacity(0.3),
+            alignment: .top
+        )
     }
     
     // MARK: - Empty State Section
@@ -187,7 +239,7 @@ struct TourListView: View {
             if viewModel.isLoading {
                 ProgressView("Loading tours...")
                     .padding()
-            } else if searchText.isEmpty && selectedCategory == nil && !viewModel.hasActiveFilters {
+            } else if searchText.isEmpty && viewModel.selectedCategory == nil && !viewModel.hasActiveFilters {
                 // No tours available
                 Image(systemName: "map")
                     .font(.system(size: 60))
@@ -225,8 +277,8 @@ struct TourListView: View {
                 
                 Button("Clear Filters") {
                     searchText = ""
-                    selectedCategory = nil
                     viewModel.clearAllFilters()
+                    isSearching = false
                 }
                 .buttonStyle(.bordered)
             }
@@ -235,10 +287,6 @@ struct TourListView: View {
     }
     
     // MARK: - Actions
-    
-    private func handleTourTap(_ tour: Tour) {
-        selectedTour = tour
-    }
     
     private func handleTourDownload(_ tour: Tour) {
         Task {
@@ -260,30 +308,34 @@ struct CategoryCard: View {
     
     var body: some View {
         Button(action: onTap) {
-            VStack(spacing: 12) {
+            VStack(spacing: 8) {
                 Image(systemName: category.iconName)
-                    .font(.system(size: 24))
+                    .font(.system(size: 20))
                     .foregroundColor(.white)
-                    .frame(width: 50, height: 50)
+                    .frame(width: 40, height: 40)
                     .background(colorFromString(category.color))
-                    .cornerRadius(25)
+                    .cornerRadius(20)
                 
-                VStack(spacing: 4) {
+                VStack(spacing: 2) {
                     Text(category.rawValue)
-                        .font(.subheadline)
+                        .font(.caption)
                         .fontWeight(.medium)
                         .foregroundColor(.primary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                     
                     Text("\(tourCount) tours")
-                        .font(.caption)
+                        .font(.caption2)
                         .foregroundColor(.secondary)
                 }
             }
-            .frame(width: 100)
-            .padding()
+            .frame(maxWidth: .infinity)
+            .frame(height: 85)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 10)
             .background(Color(.systemBackground))
-            .cornerRadius(12)
-            .shadow(radius: 2)
+            .cornerRadius(10)
+            .shadow(radius: 1)
         }
         .buttonStyle(PlainButtonStyle())
     }
@@ -315,15 +367,15 @@ struct TourRowView: View {
             // Tour Thumbnail
             RoundedRectangle(cornerRadius: 8)
                 .fill(Color.gray.opacity(0.2))
-                .frame(width: 60, height: 60)
+                .frame(width: 55, height: 55)
                 .overlay(
                     Image(systemName: tour.category.iconName)
-                        .font(.system(size: 20))
+                        .font(.system(size: 18))
                         .foregroundColor(colorFromString(tour.category.color))
                 )
             
             // Tour Information
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(tour.name)
                     .font(.subheadline)
                     .fontWeight(.medium)
@@ -332,33 +384,40 @@ struct TourRowView: View {
                 Text(tour.tourDescription)
                     .font(.caption)
                     .foregroundColor(.secondary)
-                    .lineLimit(2)
+                    .lineLimit(1)
                 
-                HStack(spacing: 12) {
-                    // Duration
-                    Label(formatDuration(tour.estimatedDuration), systemImage: "clock")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                    
-                    // POI Count
-                    Label("\(tour.pointsOfInterest.count) stops", systemImage: "mappin")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
+                HStack(spacing: 8) {
+                    // Duration and POI Count combined
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock")
+                            .font(.caption)
+                        Text(formatDuration(tour.estimatedDuration))
+                            .font(.caption)
+                        
+                        Text("•")
+                            .font(.caption)
+                            .foregroundColor(.secondary.opacity(0.7))
+                        
+                        Image(systemName: "mappin")
+                            .font(.caption)
+                        Text("\(tour.pointsOfInterest.count) stops")
+                            .font(.caption)
+                    }
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: true, vertical: false)
                     
                     Spacer()
                     
-                    // Tour Type Badge
-                    Text(tour.tourType.rawValue)
+                    // Tour Type Badge (smaller and simpler)
+                    Text(tour.tourType.rawValue.capitalized)
                         .font(.caption2)
                         .fontWeight(.medium)
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(colorFromString(tour.tourType.color))
-                        .cornerRadius(6)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                        .fixedSize(horizontal: true, vertical: false)
+                        .foregroundColor(colorFromString(tour.tourType.color))
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(colorFromString(tour.tourType.color).opacity(0.15))
+                        .cornerRadius(3)
+                        .fixedSize()
                 }
             }
             
@@ -367,13 +426,10 @@ struct TourRowView: View {
             // Download/Action Button
             downloadButton
         }
-        .padding()
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
         .background(Color(.systemBackground))
         .cornerRadius(12)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            onTap()
-        }
     }
     
     @ViewBuilder
