@@ -9,7 +9,7 @@ import CoreLocation
 
 @MainActor
 final class AudioManager: NSObject, ObservableObject {
-    static let shared = AudioManager(audioStorageService: nil, dataService: nil, hybridContentManager: nil)
+    static let shared = AudioManager(audioStorageService: nil, dataService: nil, hybridContentManager: nil, imageCache: nil, bufferManager: nil)
     
     // MARK: - Audio Players (Dual System for Crossfading)
     private var primaryPlayer: AVAudioPlayer?
@@ -61,6 +61,8 @@ final class AudioManager: NSObject, ObservableObject {
     private let audioStorageService: AudioStorageService
     private let dataService: DataService
     private let hybridContentManager: HybridContentManager
+    private let imageCache: ImageCacheManager
+    private let bufferManager: AudioBufferManager
     
     // MARK: - Predictive Loading
     private var predictiveQueue: [AudioQueueItem] = []
@@ -78,12 +80,16 @@ final class AudioManager: NSObject, ObservableObject {
     init(
         audioStorageService: AudioStorageService? = nil,
         dataService: DataService? = nil,
-        hybridContentManager: HybridContentManager? = nil
+        hybridContentManager: HybridContentManager? = nil,
+        imageCache: ImageCacheManager? = nil,
+        bufferManager: AudioBufferManager? = nil
     ) {
         self.audioSession = AVAudioSession.sharedInstance()
         self.audioStorageService = audioStorageService ?? AudioStorageService.shared
         self.dataService = dataService ?? DataService.shared
         self.hybridContentManager = hybridContentManager ?? HybridContentManager.shared
+        self.imageCache = imageCache ?? ImageCacheManager.shared
+        self.bufferManager = bufferManager ?? AudioBufferManager()
         super.init()
         
         Task { @MainActor in
@@ -96,14 +102,43 @@ final class AudioManager: NSObject, ObservableObject {
     }
     
     deinit {
+        // Invalidate timers to prevent retain cycles
         crossfadeTimer?.invalidate()
+        crossfadeTimer = nil
         mockTimer?.invalidate()
+        mockTimer = nil
+        
+        // Clear context to break potential retain cycles
+        crossfadeContext = nil
+        
+        // Remove observers
         if let obs = audioSessionObserver {
             NotificationCenter.default.removeObserver(obs)
+            audioSessionObserver = nil
         }
         if let obs = routeChangeObserver {
             NotificationCenter.default.removeObserver(obs)
+            routeChangeObserver = nil
         }
+        
+        // Cancel all Combine subscriptions
+        cancellables.removeAll()
+        
+        // Clean up audio players
+        primaryPlayer?.stop()
+        primaryPlayer = nil
+        secondaryPlayer?.stop()
+        secondaryPlayer = nil
+        
+        // Clear collections that might hold references
+        audioQueue.removeAll()
+        predictiveQueue.removeAll()
+        preloadedContent.removeAll()
+        userSkipPatterns.removeAll()
+        userListeningDuration.removeAll()
+        userPreferredPlaybackTimes.removeAll()
+        
+        print("🧹 AudioManager cleanup completed")
     }
     
     // MARK: - Professional Audio Session Configuration
@@ -478,9 +513,20 @@ final class AudioManager: NSObject, ObservableObject {
         
         if currentAudioSession != .active { await setupProfessionalAudioSession() }
         
+        // Update buffer configuration based on playback state
+        bufferManager.adjustBuffersForPlayback(
+            isPlaying: isPlaying,
+            isCrossfading: isCrossfading,
+            isBackgroundMode: UIApplication.shared.applicationState == .background
+        )
+        
         do {
             let newPlayer = try AVAudioPlayer(contentsOf: url)
             newPlayer.delegate = self
+            
+            // Configure player with optimized buffer settings
+            configureAudioPlayerBuffer(newPlayer)
+            
             newPlayer.prepareToPlay()
             newPlayer.enableRate = true
             newPlayer.rate = playbackRate
@@ -512,6 +558,12 @@ final class AudioManager: NSObject, ObservableObject {
             print("🎵 Started audio playback for POI: \(poi.name)")
         } catch {
             isBuffering = false
+            // Record buffer performance issue
+            bufferManager.recordBufferMetrics(
+                underruns: 1,
+                latency: 0.0,
+                memoryUsage: 0
+            )
             throw AudioError.playbackFailed(error)
         }
     }
@@ -722,6 +774,13 @@ final class AudioManager: NSObject, ObservableObject {
         let crossfadeDuration: TimeInterval = 2.0
         let oldPlayer = getCurrentPlayer()
         
+        // Update buffer manager for crossfading state
+        bufferManager.adjustBuffersForPlayback(
+            isPlaying: isPlaying,
+            isCrossfading: true,
+            isBackgroundMode: UIApplication.shared.applicationState == .background
+        )
+        
         print("🎵 Starting crossfade transition")
         
         newPlayer.volume = 0.0
@@ -738,18 +797,28 @@ final class AudioManager: NSObject, ObservableObject {
     }
     
     @objc private func handleCrossfadeTick() {
-        guard let ctx = crossfadeContext else { return }
+        guard let ctx = crossfadeContext else { 
+            crossfadeTimer?.invalidate()
+            crossfadeTimer = nil
+            return 
+        }
+        
         let elapsed = CACurrentMediaTime() - ctx.startTime
         let progress = max(0.0, min(1.0, elapsed / ctx.duration))
         ctx.oldPlayer?.volume = Float((1.0 - progress)) * volume
         ctx.newPlayer?.volume = Float(progress) * volume
+        
         if progress >= 1.0 {
             ctx.oldPlayer?.stop()
             ctx.newPlayer?.volume = volume
             isCrossfading = false
+            
+            // Clean up timer and context
             crossfadeTimer?.invalidate()
             crossfadeTimer = nil
+            ctx.cleanup()
             crossfadeContext = nil
+            
             print("✅ Crossfade transition completed")
         }
     }
@@ -760,6 +829,9 @@ final class AudioManager: NSObject, ObservableObject {
         currentTour = tour
         currentTourPublic = tour
         if let tour = tour {
+            // Configure audio buffer for tour type
+            bufferManager.configureBifers(for: tour.tourType)
+            
             switch tour.tourType {
             case .driving:
                 volume = 0.8
@@ -775,6 +847,22 @@ final class AudioManager: NSObject, ObservableObject {
                 print("ℹ️ Audio configured for unknown tour type: \(tour.name)")
             }
         }
+    }
+    
+    // MARK: - Buffer Configuration
+    
+    private func configureAudioPlayerBuffer(_ player: AVAudioPlayer) {
+        // While AVAudioPlayer doesn't expose buffer size directly,
+        // we can use the buffer manager to guide our preloading decisions
+        let optimalPreloadCount = bufferManager.getOptimalPreloadCount()
+        
+        // Adjust predictive loading based on buffer configuration
+        if predictiveQueue.count > optimalPreloadCount {
+            // Reduce predictive queue to match buffer capacity
+            predictiveQueue = Array(predictiveQueue.prefix(optimalPreloadCount))
+        }
+        
+        print("🔊 Audio player configured with \(optimalPreloadCount) preload buffers")
     }
     
     // Phase 4: Auto-play audio for POI visit
@@ -867,14 +955,17 @@ extension AudioManager {
     
     @objc private func handleMockTick() {
         guard isPlaying else {
-            mockTimer?.invalidate(); mockTimer = nil
+            mockTimer?.invalidate()
+            mockTimer = nil
             return
         }
+        
         currentTime += 1.0
         if currentTime >= duration {
-            mockTimer?.invalidate(); mockTimer = nil
-            Task { @MainActor in
-                await self.handleMockPlaybackCompletion()
+            mockTimer?.invalidate()
+            mockTimer = nil
+            Task { @MainActor [weak self] in
+                await self?.handleMockPlaybackCompletion()
             }
         }
     }
@@ -904,8 +995,13 @@ extension AudioManager {
     }
     
     func pause() {
-        crossfadeTimer?.invalidate(); crossfadeTimer = nil
-        mockTimer?.invalidate(); mockTimer = nil
+        // Clean up timers and contexts
+        crossfadeTimer?.invalidate()
+        crossfadeTimer = nil
+        mockTimer?.invalidate()
+        mockTimer = nil
+        crossfadeContext = nil
+        
         getCurrentPlayer()?.pause()
         isPlaying = false
         isCrossfading = false
@@ -924,18 +1020,31 @@ extension AudioManager {
     }
     
     func stop() {
-        crossfadeTimer?.invalidate(); crossfadeTimer = nil
-        mockTimer?.invalidate(); mockTimer = nil
+        // Clean up timers and contexts
+        crossfadeTimer?.invalidate()
+        crossfadeTimer = nil
+        mockTimer?.invalidate()
+        mockTimer = nil
+        crossfadeContext = nil
+        
+        // Stop and clean up players
         primaryPlayer?.stop()
         secondaryPlayer?.stop()
         primaryPlayer = nil
         secondaryPlayer = nil
+        
+        // Reset state
         isPlaying = false
         isCrossfading = false
         isBuffering = false
         currentTime = 0
         currentPOI = nil
         currentPlaybackSession = nil
+        
+        // Clear queues to free memory
+        audioQueue.removeAll()
+        currentQueueIndex = 0
+        
         Task { @MainActor in await clearNowPlayingInfo() }
         print("⏹️ Audio playback stopped")
     }
@@ -1129,17 +1238,21 @@ extension AudioManager {
     private func createDefaultArtwork() -> MPMediaItemArtwork? {
         let artworkSize = CGSize(width: 512, height: 512)
         return MPMediaItemArtwork(boundsSize: artworkSize) { size in
+            // Fallback to default gradient artwork (simplified for synchronous execution)
             UIGraphicsBeginImageContextWithOptions(size, false, 0.0)
             defer { UIGraphicsEndImageContext() }
             guard let context = UIGraphicsGetCurrentContext() else { return UIImage() }
+            
             let colors = [UIColor.systemBlue.cgColor, UIColor.systemPurple.cgColor]
             let colorSpace = CGColorSpaceCreateDeviceRGB()
             let gradient = CGGradient(colorsSpace: colorSpace, colors: colors as CFArray, locations: nil)!
             context.drawLinearGradient(gradient, start: CGPoint(x: 0, y: 0), end: CGPoint(x: size.width, y: size.height), options: [])
+            
             let iconSize: CGFloat = size.width * 0.4
             let iconRect = CGRect(x: (size.width - iconSize) / 2, y: (size.height - iconSize) / 2, width: iconSize, height: iconSize)
             UIColor.white.setFill()
             UIBezierPath(ovalIn: iconRect).fill()
+            
             return UIGraphicsGetImageFromCurrentImageContext() ?? UIImage()
         }
     }
@@ -1230,11 +1343,17 @@ private final class CrossfadeContext {
     weak var newPlayer: AVAudioPlayer?
     let startTime: CFTimeInterval
     let duration: TimeInterval
+    
     init(old: AVAudioPlayer?, new: AVAudioPlayer, duration: TimeInterval) {
         self.oldPlayer = old
         self.newPlayer = new
         self.duration = duration
         self.startTime = CACurrentMediaTime()
+    }
+    
+    func cleanup() {
+        oldPlayer = nil
+        newPlayer = nil
     }
 }
 

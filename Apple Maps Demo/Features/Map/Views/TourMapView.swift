@@ -69,6 +69,10 @@ struct POIMarker: View {
     let isSelected: Bool
     @ObservedObject var viewModel: MapViewModel
     
+    // Performance optimization: Cache marker image
+    @State private var cachedMarkerImage: UIImage?
+    @StateObject private var imageCache = ImageCacheManager.shared
+    
     // Phase 4: Enhanced marker state
     private var isInActiveSession: Bool {
         viewModel.currentVisitSession?.poi.id == poi.id
@@ -105,13 +109,21 @@ struct POIMarker: View {
                     .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isInActiveSession)
             }
             
-            Circle()
-                .fill(markerColor)
-                .frame(width: 30, height: 30)
-            
-            Image(systemName: markerIcon)
-                .foregroundColor(.white)
-                .font(.system(size: 20))
+            // Use cached marker image if available, fallback to generated marker
+            if let markerImage = cachedMarkerImage {
+                Image(uiImage: markerImage)
+                    .resizable()
+                    .frame(width: 30, height: 30)
+            } else {
+                Circle()
+                    .fill(markerColor)
+                    .frame(width: 30, height: 30)
+                    .overlay(
+                        Image(systemName: markerIcon)
+                            .foregroundColor(.white)
+                            .font(.system(size: 16))
+                    )
+            }
             
             if isSelected {
                 Circle()
@@ -122,6 +134,30 @@ struct POIMarker: View {
         .scaleEffect(isSelected ? 1.2 : 1.0)
         .animation(.easeInOut(duration: 0.2), value: isSelected)
         .animation(.easeInOut(duration: 0.3), value: isInActiveSession)
+        .task {
+            // Load cached marker image asynchronously
+            cachedMarkerImage = imageCache.createPOIMarkerImage(
+                for: poi,
+                isVisited: isVisited,
+                isActive: isInActiveSession
+            )
+        }
+        .onChange(of: isVisited) { oldValue, newValue in
+            // Update cached image when visit status changes
+            cachedMarkerImage = imageCache.createPOIMarkerImage(
+                for: poi,
+                isVisited: newValue,
+                isActive: isInActiveSession
+            )
+        }
+        .onChange(of: isInActiveSession) { oldValue, newValue in
+            // Update cached image when active session changes
+            cachedMarkerImage = imageCache.createPOIMarkerImage(
+                for: poi,
+                isVisited: isVisited,
+                isActive: newValue
+            )
+        }
     }
 }
 

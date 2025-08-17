@@ -368,15 +368,36 @@ class HybridContentManager: ObservableObject {
     // MARK: - Setup Methods
     
     private func setupConnectivityObserving() {
+        // Clear any existing subscriptions first
+        cancellables.removeAll()
+        
         // Observe connectivity changes
         NotificationCenter.default.publisher(for: Notification.Name(Constants.Notifications.connectivityChanged))
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] notification in
-                guard let connectivityInfo = notification.object as? ConnectivityInfo else { return }
+                guard let self = self,
+                      let connectivityInfo = notification.object as? ConnectivityInfo else { return }
                 Task { @MainActor in
-                    await self?.handleConnectivityChange(connectivityInfo)
+                    await self.handleConnectivityChange(connectivityInfo)
                 }
             }
             .store(in: &cancellables)
+    }
+    
+    deinit {
+        // Cancel all preloading tasks
+        for (_, task) in preloadingTasks {
+            task.cancel()
+        }
+        preloadingTasks.removeAll()
+        
+        // Clear cancellables
+        cancellables.removeAll()
+        
+        // Clear collections
+        syncQueue.removeAll()
+        
+        print("🧹 HybridContentManager cleanup completed")
     }
     
     private func handleConnectivityChange(_ info: ConnectivityInfo) async {
