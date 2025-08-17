@@ -3,6 +3,59 @@ import CoreLocation
 import Combine
 import UIKit
 
+/// Intelligent location tracking and geofencing manager with battery optimization.
+///
+/// `LocationManager` provides comprehensive location services for audio tours with
+/// advanced features including dynamic accuracy adjustment, battery-aware optimization,
+/// intelligent geofencing, and tour type adaptation. The manager automatically
+/// optimizes GPS accuracy and update frequency based on device conditions.
+///
+/// ## Key Features
+///
+/// - **Dynamic Accuracy**: Automatically adjusts GPS accuracy based on battery level and tour type
+/// - **Smart Geofencing**: Intelligent region management with iOS 20-region limit optimization
+/// - **Battery Optimization**: Reduces location accuracy and frequency when battery is low
+/// - **Movement Detection**: Adapts behavior based on detected movement patterns
+/// - **Tour Type Adaptation**: Optimizes settings for walking, driving, or mixed tours
+///
+/// ## Usage
+///
+/// ```swift
+/// let locationManager = LocationManager.shared
+/// 
+/// // Request location permission
+/// let status = await locationManager.requestAuthorization()
+/// 
+/// // Start location updates
+/// locationManager.startUpdatingLocation()
+/// 
+/// // Configure for tour type
+/// locationManager.configureTourType(.walking)
+/// 
+/// // Monitor POI geofences
+/// locationManager.startMonitoring(poi: pointOfInterest)
+/// ```
+///
+/// ## Battery Optimization
+///
+/// The manager automatically adjusts location accuracy based on battery level:
+/// - **> 50%**: Full accuracy for optimal experience
+/// - **20-50%**: Moderate accuracy to conserve battery
+/// - **< 20%**: Aggressive optimization with reduced accuracy
+///
+/// ## Tour Type Optimization
+///
+/// Different tour types receive optimized location settings:
+/// - ``TourType/walking``: High accuracy, smaller geofences, longer dwell times
+/// - ``TourType/driving``: Medium accuracy, larger geofences, shorter dwell times
+/// - ``TourType/mixed``: Adaptive accuracy based on detected movement speed
+///
+/// ## Performance Characteristics
+///
+/// - Automatic stationary mode detection to reduce GPS usage
+/// - Dynamic geofence registration based on proximity
+/// - Movement pattern analysis for behavioral adaptation
+/// - Memory-efficient region management within iOS limits
 class LocationManager: NSObject, ObservableObject {
     static let shared = LocationManager()
     

@@ -2,29 +2,133 @@ import Foundation
 import CoreLocation
 import SwiftData
 
+/// A complete audio tour containing points of interest and metadata.
+///
+/// `Tour` represents a complete audio tour experience with geographic locations,
+/// estimated timing, difficulty ratings, and downloadable content. Tours can be
+/// configured for different movement types (walking, driving, mixed) and include
+/// intelligent performance optimizations.
+///
+/// ## Usage
+///
+/// ```swift
+/// let tour = Tour(
+///     name: "Historic Downtown Walking Tour",
+///     tourDescription: "Explore the historic district...",
+///     pointsOfInterest: [poi1, poi2, poi3],
+///     estimatedDuration: 3600, // 1 hour
+///     language: "en",
+///     category: .historical,
+///     tourType: .walking
+/// )
+/// ```
+///
+/// ## Tour Types
+///
+/// Different tour types optimize for specific movement patterns:
+/// - ``TourType/walking``: High GPS accuracy, 30-second dwell times
+/// - ``TourType/driving``: Medium accuracy, 5-second dwell times  
+/// - ``TourType/mixed``: Adaptive accuracy based on detected speed
+///
+/// ## Performance Characteristics
+///
+/// Tours automatically optimize location tracking and geofencing based on:
+/// - Movement speed detection
+/// - Battery level monitoring
+/// - Network connectivity status
+/// - User preference settings
 @Model
 final class Tour: @unchecked Sendable, Identifiable {
+    /// Unique identifier for the tour.
     var id: UUID
+    
+    /// Display name of the tour.
     var name: String
+    
+    /// Detailed description of the tour content and experience.
     var tourDescription: String
+    
+    /// Collection of geographic points of interest included in this tour.
+    ///
+    /// Points are typically ordered by suggested visitation sequence.
+    /// Each POI contains location coordinates, geofencing radius, and audio content.
     var pointsOfInterest: [PointOfInterest]
+    
+    /// Estimated duration to complete the tour in seconds.
+    ///
+    /// This includes walking/driving time between POIs and estimated listening time
+    /// for all audio content. Actual duration may vary based on user pace and preferences.
     var estimatedDuration: TimeInterval
+    
+    /// Primary language code for tour content (ISO 639-1 format).
+    ///
+    /// Examples: "en" for English, "es" for Spanish, "fr" for French
     var language: String
+    
+    /// Date when the tour was first created.
     var createdAt: Date
+    
+    /// Date when the tour was last modified or updated.
     var lastModified: Date
+    
+    /// Optional URL for the tour's cover image.
+    ///
+    /// Used for display in tour lists and detail views. Should be web-accessible
+    /// or reference a local asset bundle resource.
     var coverImageURL: URL?
+    
+    /// Category classification for the tour.
     var category: TourCategory
+    
+    /// Whether all tour content has been downloaded for offline use.
+    ///
+    /// When `true`, the tour can be experienced without network connectivity.
+    /// Audio content and map data are cached locally.
     var isDownloaded: Bool
+    
+    /// Total walking/driving distance for the complete tour in meters.
     var totalDistance: CLLocationDistance
+    
+    /// Difficulty rating for physical requirements.
     var difficulty: TourDifficulty
+    
+    /// User rating average (0.0 to 5.0).
     var rating: Double
+    
+    /// Number of user reviews submitted for this tour.
     var reviewCount: Int
+    
+    /// Optional name of the tour creator or organization.
     var authorName: String?
+    
+    /// Version string for tracking tour updates and compatibility.
     var version: String
+    
+    /// Searchable tags for tour discovery and filtering.
+    ///
+    /// Common tags include activity types, themes, or notable features.
+    /// Example: ["historic", "architecture", "family-friendly"]
     var tags: [String]
+    
+    /// Movement type optimization for location tracking and geofencing.
+    ///
+    /// Determines GPS accuracy, geofence sizing, and dwell time behavior:
+    /// - ``TourType/walking``: High accuracy, smaller geofences, longer dwell times
+    /// - ``TourType/driving``: Medium accuracy, larger geofences, shorter dwell times
+    /// - ``TourType/mixed``: Adaptive behavior based on detected movement speed
     var tourType: TourType
-    var maxSpeed: Double? // Maximum expected speed for this tour (mph)
-    var dwellTimeOverride: TimeInterval? // Custom dwell time if different from tour type default
+    
+    /// Maximum expected movement speed in miles per hour.
+    ///
+    /// Used for speed-based tour type validation and geofence optimization.
+    /// When `nil`, defaults are used based on `tourType`.
+    var maxSpeed: Double?
+    
+    /// Custom dwell time override in seconds.
+    ///
+    /// Overrides the default dwell time for the tour type. Used for tours
+    /// with special timing requirements or accessibility considerations.
+    var dwellTimeOverride: TimeInterval?
     
     init(
         id: UUID = UUID(),

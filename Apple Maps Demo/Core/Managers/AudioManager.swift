@@ -7,6 +7,50 @@ import CoreLocation
 
 // MARK: - AudioManager
 
+/// Professional audio playback engine with crossfading and CarPlay integration.
+///
+/// `AudioManager` provides comprehensive audio playback capabilities for location-based
+/// audio tours, including seamless crossfading between POI content, background playback,
+/// and full CarPlay integration. The manager handles audio session interruptions,
+/// external device connections, and performance optimization.
+///
+/// ## Key Features
+///
+/// - **Dual Player System**: Primary and secondary AVAudioPlayer instances for smooth crossfading
+/// - **Background Playback**: Continues audio when app moves to background
+/// - **CarPlay Integration**: Native CarPlay media controls and Now Playing information
+/// - **Audio Session Management**: Handles interruptions, route changes, and external devices
+/// - **Performance Optimization**: Dynamic buffer management and memory-aware caching
+///
+/// ## Usage
+///
+/// ```swift
+/// let audioManager = AudioManager.shared
+/// 
+/// // Start playing POI content
+/// await audioManager.playPOI(pointOfInterest, from: tour)
+/// 
+/// // Configure crossfading
+/// audioManager.setCrossfadeDuration(2.0)
+/// 
+/// // Handle background playback
+/// audioManager.enableBackgroundPlayback(true)
+/// ```
+///
+/// ## Audio Session Configuration
+///
+/// The manager automatically configures the audio session for:
+/// - Background playback capability
+/// - CarPlay compatibility
+/// - External audio device support
+/// - Interruption handling (calls, other media)
+///
+/// ## Performance Characteristics
+///
+/// - Memory-efficient dual player system
+/// - Optimized for battery usage with dynamic buffer management
+/// - Automatic audio quality adjustment based on network conditions
+/// - Intelligent caching with ``ImageCacheManager`` integration
 @MainActor
 final class AudioManager: NSObject, ObservableObject {
     static let shared = AudioManager(audioStorageService: nil, dataService: nil, hybridContentManager: nil, imageCache: nil, bufferManager: nil)
@@ -994,6 +1038,17 @@ extension AudioManager {
         await clearNowPlayingInfo()
     }
     
+    /// Pauses the currently playing audio content.
+    ///
+    /// Gracefully pauses audio playback while preserving the current position and state.
+    /// Cleans up active timers and crossfade operations to optimize battery usage.
+    /// Updates Now Playing information to reflect the paused state.
+    ///
+    /// ## Side Effects
+    /// - Stops all active crossfade operations
+    /// - Cleans up timer resources
+    /// - Updates CarPlay Now Playing information
+    /// - Sets ``isPlaying`` to `false`
     func pause() {
         // Clean up timers and contexts
         crossfadeTimer?.invalidate()
@@ -1009,6 +1064,13 @@ extension AudioManager {
         print("⏸️ Audio playback paused")
     }
     
+    /// Resumes paused audio playback from the current position.
+    ///
+    /// Continues audio playback from where it was paused. If no audio player
+    /// is available, this method returns early without error.
+    ///
+    /// - Requires: Audio content must be previously loaded and paused
+    /// - Postcondition: ``isPlaying`` is set to `true` if playback resumes successfully
     func resume() {
         guard let currentPlayer = getCurrentPlayer() else {
             print("❌ No active player to resume"); return
